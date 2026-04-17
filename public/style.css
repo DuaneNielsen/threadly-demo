@@ -271,10 +271,65 @@ button.danger:hover { background: var(--accent-red); color: #fff; }
   margin-bottom: 16px;
 }
 
+.rca-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
 .diagnosis-card h2 {
   font-size: 16px;
-  margin-bottom: 12px;
+  margin: 0;
   color: var(--accent-red);
+}
+
+.rca-view-toggle {
+  display: flex;
+  gap: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.view-tab {
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.view-tab + .view-tab {
+  border-left: 1px solid var(--border);
+}
+
+.view-tab.active {
+  background: var(--border);
+  color: var(--text);
+}
+
+.view-tab:hover:not(.active) {
+  color: var(--text);
+}
+
+.rca-json {
+  font-family: 'SF Mono', SFMono-Regular, Consolas, 'Liberation Mono', Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  background: #010409;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 16px;
+  overflow: auto;
+  max-height: 600px;
+  color: #79c0ff;
+  white-space: pre;
+  margin: 0;
 }
 
 .diagnosis-card .detail {
@@ -380,6 +435,7 @@ button.danger:hover { background: var(--accent-red); color: #fff; }
 /* Options */
 .options-grid {
   display: grid;
+  grid-template-columns: repeat(3, 1fr);
   gap: 16px;
 }
 

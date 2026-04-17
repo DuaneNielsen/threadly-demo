@@ -24,15 +24,6 @@
       <button class="danger" id="resetBtn" onclick="resetState()">Reset</button>
     </div>
 
-    <!-- Phase 1 Terminal -->
-    <div class="terminal" id="phase1Terminal">
-      <div class="terminal-header">
-        <span>Phase 1 &mdash; Analysis</span>
-        <span id="phase1Meta"></span>
-      </div>
-      <div class="terminal-body" id="phase1Log"></div>
-    </div>
-
     <!-- Trigger -->
     <div class="trigger-panel" id="triggerPanel">
       <div class="trigger-card">
@@ -45,11 +36,31 @@
       </div>
     </div>
 
+    <!-- Phase 1 Terminal -->
+    <div class="terminal" id="phase1Terminal">
+      <div class="terminal-header">
+        <span>Phase 1 &mdash; Analysis</span>
+        <span id="phase1Meta"></span>
+      </div>
+      <div class="terminal-body" id="phase1Log"></div>
+    </div>
+
     <!-- Diagnosis + Options -->
     <div class="diagnosis-panel" id="diagnosisPanel">
       <div class="diagnosis-card">
-        <h2>Root Cause Analysis</h2>
-        <div class="detail" id="diagnosisDetail"></div>
+        <div class="rca-header">
+          <h2>Root Cause Analysis</h2>
+          <div class="rca-view-toggle">
+            <button class="view-tab active" data-view="formatted" onclick="switchRcaView('formatted')">Formatted</button>
+            <button class="view-tab" data-view="source" onclick="switchRcaView('source')">Source JSON</button>
+          </div>
+        </div>
+        <div class="rca-view" id="rcaFormatted">
+          <div class="detail" id="diagnosisDetail"></div>
+        </div>
+        <div class="rca-view" id="rcaSource" style="display:none">
+          <pre class="rca-json" id="rcaJson"></pre>
+        </div>
       </div>
       <div class="options-grid" id="optionsGrid"></div>
     </div>
@@ -254,6 +265,12 @@ function renderOptions(diagnosis, options) {
   diagnosisPanel.classList.add('visible');
 }
 
+function switchRcaView(view) {
+  document.getElementById('rcaFormatted').style.display = view === 'formatted' ? '' : 'none';
+  document.getElementById('rcaSource').style.display = view === 'source' ? '' : 'none';
+  document.querySelectorAll('.view-tab').forEach(t => t.classList.toggle('active', t.dataset.view === view));
+}
+
 function esc(s) {
   if (!s) return '';
   const el = document.createElement('span');
@@ -294,6 +311,9 @@ function connect() {
   evtSource.addEventListener('phase1_complete', (e) => {
     const d = JSON.parse(e.data);
     renderOptions(d.diagnosis, d.options);
+    if (d.raw_json) {
+      document.getElementById('rcaJson').textContent = d.raw_json;
+    }
   });
 
   evtSource.addEventListener('phase2_start', (e) => {

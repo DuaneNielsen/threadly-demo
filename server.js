@@ -80,6 +80,8 @@ function dispatchClaude(prompt, phase, contextFile) {
         const content = ev.message?.content || [];
         for (const block of content) {
           if (block.type === 'text' && block.text) {
+            const trimmed = block.text.trim();
+            if (phase === 1 && trimmed.startsWith('{') && trimmed.includes('"diagnosis"')) continue;
             broadcast(`${prefix}_stream`, { text: block.text });
           } else if (block.type === 'tool_use') {
             broadcast(`${prefix}_tool`, {
@@ -190,19 +192,26 @@ Output ONLY valid JSON matching this schema — no markdown fences, no extra tex
     const result = await dispatchClaude(prompt, 1, PHASE1_CONTEXT);
     let parsed;
     try {
-      // Try parsing the result directly
       parsed = JSON.parse(result);
     } catch {
-      // Try extracting JSON from markdown fences
-      const match = result.match(/```(?:json)?\s*([\s\S]*?)```/);
-      if (match) parsed = JSON.parse(match[1]);
-      else {
-        // Try finding first { to last }
-        const start = result.indexOf('{');
-        const end = result.lastIndexOf('}');
-        if (start >= 0 && end > start) parsed = JSON.parse(result.slice(start, end + 1));
-        else throw new Error('No JSON found in Phase 1 output');
+      // Find the outermost JSON object by matching braces
+      const start = result.indexOf('{');
+      if (start < 0) throw new Error('No JSON found in Phase 1 output');
+      let depth = 0;
+      let inString = false;
+      let escape = false;
+      let end = -1;
+      for (let i = start; i < result.length; i++) {
+        const ch = result[i];
+        if (escape) { escape = false; continue; }
+        if (ch === '\\' && inString) { escape = true; continue; }
+        if (ch === '"') { inString = !inString; continue; }
+        if (inString) continue;
+        if (ch === '{') depth++;
+        else if (ch === '}') { depth--; if (depth === 0) { end = i; break; } }
       }
+      if (end < 0) throw new Error('Unbalanced JSON in Phase 1 output');
+      parsed = JSON.parse(result.slice(start, end + 1));
     }
 
     parsed.options.sort((a, b) => b.confidence - a.confidence);
@@ -219,7 +228,7 @@ Output ONLY valid JSON matching this schema — no markdown fences, no extra tex
     };
 
     setState('awaiting_choice');
-    broadcast('phase1_complete', { diagnosis: currentDiagnosis, options: currentOptions });
+    broadcast('phase1_complete', { diagnosis: currentDiagnosis, options: currentOptions, raw_json: JSON.stringify(parsed, null, 2) });
     return { status: 'analyzed' };
   } catch (err) {
     broadcast('error', { message: `Phase 1 failed: ${err.message}` });
