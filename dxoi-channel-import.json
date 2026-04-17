@@ -1,0 +1,106 @@
+{
+  "channels": [
+    {
+      "name": "Claude Remediation",
+      "protocol": "WEBHOOK",
+      "subProtocol": "genericwebhook",
+      "status": true,
+      "filterNames": [
+        "Claude Remediation Policy"
+      ],
+      "webhookSpec": {
+        "headers": {},
+        "formParams": null,
+        "authDetails": {
+          "authType": "NO_AUTH"
+        },
+        "proxyId": 0,
+        "orgId": null,
+        "url": "https://thor.tailc6067a.ts.net/webhook",
+        "payload": {
+          "alarm_name": "${alarm_name}",
+          "severity": "${severity}",
+          "status": "${status}",
+          "host": "${host}",
+          "agent": "${agent}",
+          "metric_name": "${metric_name}",
+          "metric_value": "${metric_value}",
+          "component_name": "${component_name}",
+          "message": "${message}",
+          "alert_external_id": "${alert_external_id}",
+          "alarm_type": "${alarmType}",
+          "danger_threshold": "${danger_threshold}",
+          "caution_threshold": "${caution_threshold}"
+        },
+        "advancedPayload": null,
+        "isAdvancedPayload": false
+      },
+      "maskRecipients": false,
+      "onPrem": false,
+      "proxyEnabled": false,
+      "proxyId": 0,
+      "linkedEntities": [
+        {
+          "channelName": "Claude Remediation",
+          "messageTemplateName": null,
+          "filterName": "Claude Remediation Policy"
+        }
+      ],
+      "enableProxy": false
+    }
+  ],
+  "policies": [
+    {
+      "name": "Claude Remediation Policy",
+      "active": true,
+      "channelNames": [
+        "Claude Remediation"
+      ],
+      "filterType": "AUTOMATIC",
+      "linkedEntities": [
+        {
+          "channelName": "Claude Remediation",
+          "messageTemplateName": null,
+          "filterName": "Claude Remediation Policy"
+        }
+      ],
+      "filterExpressionV1": {
+        "and": {
+          "expressions": [
+            {
+              "and": {
+                "expressions": [
+                  {
+                    "field": "alarmType",
+                    "condition": "not_equals",
+                    "value": "Service"
+                  }
+                ]
+              }
+            },
+            {
+              "or": {
+                "expressions": [
+                  {
+                    "field": "severity",
+                    "condition": "increases",
+                    "value": "severity"
+                  },
+                  {
+                    "field": "severity",
+                    "condition": "greater_than",
+                    "value": "Unknown"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "alarmCategory": "rawAlarm",
+      "serviceAlarmAction": false,
+      "isComplexFilter": false
+    }
+  ],
+  "templates": []
+}
