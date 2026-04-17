@@ -30,6 +30,7 @@ const LOG_FILE = process.env.CLAUDE_LOG || '/tmp/claude-sre.log';
 const APP_PORT = process.env.APP_PORT || '8180';
 const PETCLINIC_LOG = process.env.PETCLINIC_LOG || '/tmp/petclinic.log';
 const DEMO_HOST = process.env.DEMO_HOST || 'thor';
+const DEMO_TITLE = process.env.DEMO_TITLE || 'DX O2 Closed-Loop Remediation';
 
 let state = 'idle'; // idle | analyzing | awaiting_choice | executing
 let sseClients = [];
@@ -119,8 +120,10 @@ function dispatchClaude(prompt, phase, contextFile) {
         const content = ev.message?.content || [];
         for (const block of content) {
           if (block.type === 'text' && block.text) {
-            const trimmed = block.text.trim();
-            if (phase === 1 && trimmed.startsWith('{') && trimmed.includes('"diagnosis"')) continue;
+            if (phase === 1) {
+              const stripped = block.text.replace(/```json\s*|```\s*/g, '').trim();
+              if (stripped.startsWith('{') && stripped.includes('"diagnosis"')) continue;
+            }
             broadcast(`${prefix}_stream`, { text: block.text });
           } else if (block.type === 'tool_use') {
             broadcast(`${prefix}_tool`, {
@@ -342,7 +345,7 @@ const server = http.createServer(async (req, res) => {
       return jsonResponse(res, 200, { status: 'ok', mode: 'live', state });
     }
     if (url.pathname === '/status') {
-      return jsonResponse(res, 200, { state, version: getVersion(), options: currentOptions, diagnosis: currentDiagnosis, trigger: currentTrigger });
+      return jsonResponse(res, 200, { state, version: getVersion(), title: DEMO_TITLE, options: currentOptions, diagnosis: currentDiagnosis, trigger: currentTrigger });
     }
     if (url.pathname === '/events') {
       res.writeHead(200, {

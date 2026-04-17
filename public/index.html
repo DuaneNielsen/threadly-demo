@@ -3,12 +3,12 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>DX OI Closed-Loop Remediation</title>
+  <title>DX O2 Closed-Loop Remediation</title>
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
   <header>
-    <h1>DX OI <span>Closed-Loop Remediation</span></h1>
+    <h1 id="demoTitle">DX O2 <span>Closed-Loop Remediation</span></h1>
     <div class="header-right">
       <div class="version-badge" id="version">--</div>
       <div class="status-badge" id="statusBadge">
@@ -319,7 +319,7 @@ function connect() {
 
   evtSource.addEventListener('phase1_stream', (e) => {
     const d = JSON.parse(e.data);
-    appendLog(phase1Log, `<span class="log-text">${esc(d.text)}</span>`);
+    appendLog(phase1Log, `<span class="log-text">${esc(d.text)}</span>\n`);
   });
 
   evtSource.addEventListener('phase1_tool', (e) => {
@@ -351,7 +351,7 @@ function connect() {
 
   evtSource.addEventListener('phase2_stream', (e) => {
     const d = JSON.parse(e.data);
-    appendLog(phase2Log, `<span class="log-text">${esc(d.text)}</span>`);
+    appendLog(phase2Log, `<span class="log-text">${esc(d.text)}</span>\n`);
   });
 
   evtSource.addEventListener('phase2_tool', (e) => {
@@ -402,6 +402,15 @@ function connect() {
 // On load, check current state
 fetch('/status').then(r => r.json()).then(d => {
   updateStatus(d.state, d.version);
+  if (d.title) {
+    const m = d.title.match(/^(.+?)\s+(Closed-Loop Remediation)$/i);
+    if (m) {
+      document.getElementById('demoTitle').innerHTML = `${esc(m[1])} <span>${esc(m[2])}</span>`;
+    } else {
+      document.getElementById('demoTitle').textContent = d.title;
+    }
+    document.title = d.title;
+  }
   if (d.trigger) renderTrigger(d.trigger);
   if (d.state === 'awaiting_choice' && d.diagnosis && d.options) {
     renderOptions(d.diagnosis, d.options);
