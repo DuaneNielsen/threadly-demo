@@ -120,9 +120,14 @@ function dispatchClaude(prompt, phase, contextFile) {
         const content = ev.message?.content || [];
         for (const block of content) {
           if (block.type === 'text' && block.text) {
-            if (phase === 1) {
-              const stripped = block.text.replace(/```json\s*|```\s*/g, '').trim();
-              if (stripped.startsWith('{') && stripped.includes('"diagnosis"')) continue;
+            if (phase === 1 && block.text.includes('"diagnosis"')) {
+              const jsonStart = block.text.indexOf('{');
+              if (jsonStart < 0) {
+                broadcast(`${prefix}_stream`, { text: block.text });
+              } else if (jsonStart > 0) {
+                broadcast(`${prefix}_stream`, { text: block.text.slice(0, jsonStart).trimEnd() });
+              }
+              continue;
             }
             broadcast(`${prefix}_stream`, { text: block.text });
           } else if (block.type === 'tool_use') {
