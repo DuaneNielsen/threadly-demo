@@ -1,12 +1,25 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-BUILDS_DIR="$(cd "$(dirname "$0")/../builds" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# Load .env if present (env vars take precedence)
+if [ -f "$SCRIPT_DIR/.env" ]; then
+    set -a
+    source "$SCRIPT_DIR/.env"
+    set +a
+fi
+
+BUILDS_DIR="${BUILDS_DIR:-../builds}"
+# Resolve relative paths against script directory
+if [[ "$BUILDS_DIR" != /* ]]; then
+    BUILDS_DIR="$(cd "$SCRIPT_DIR/$BUILDS_DIR" && pwd)"
+fi
 ACTIVE_DIR="$BUILDS_DIR/active"
 JAR_NAME="spring-petclinic-4.0.0-SNAPSHOT.jar"
-APP_PORT=8180
-LOG_FILE="/tmp/petclinic.log"
-STDOUT_LOG="/tmp/petclinic-stdout.log"
+APP_PORT="${APP_PORT:-8180}"
+LOG_FILE="${PETCLINIC_LOG:-/tmp/petclinic.log}"
+STDOUT_LOG="${PETCLINIC_STDOUT_LOG:-/tmp/petclinic-stdout.log}"
 
 usage() {
     echo "Usage: $0 <version>"

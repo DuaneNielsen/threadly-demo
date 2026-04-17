@@ -1,17 +1,35 @@
 #!/usr/bin/env node
 const http = require('node:http');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 const readline = require('node:readline');
 
-const PORT = 5000;
-const COOLDOWN = 60;
-const BUILDS_DIR = path.resolve(__dirname, '../builds');
-const PETCLINIC_DIR = path.resolve(__dirname, '../spring-petclinic');
-const PHASE1_CONTEXT = path.join(__dirname, 'CLAUDE_SRE_PHASE1.md');
-const PHASE2_CONTEXT = path.join(__dirname, 'CLAUDE_SRE_PHASE2.md');
-const LOG_FILE = '/tmp/claude-sre.log';
+// Load .env file (env vars take precedence)
+const envPath = path.join(__dirname, '.env');
+if (fs.existsSync(envPath)) {
+  for (const line of fs.readFileSync(envPath, 'utf8').split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const eq = trimmed.indexOf('=');
+    if (eq < 0) continue;
+    const key = trimmed.slice(0, eq).trim();
+    const val = trimmed.slice(eq + 1).trim();
+    if (!(key in process.env)) process.env[key] = val;
+  }
+}
+
+const PORT = parseInt(process.env.PORT || '5000');
+const COOLDOWN = parseInt(process.env.COOLDOWN || '60');
+const BUILDS_DIR = path.resolve(__dirname, process.env.BUILDS_DIR || '../builds');
+const PETCLINIC_DIR = path.resolve(__dirname, process.env.PETCLINIC_DIR || '../spring-petclinic');
+const ANALYSIS_PHASE_CONTEXT = path.join(__dirname, 'CLAUDE_SRE_ANALYSIS_PHASE.md');
+const REMEDIATION_PHASE_CONTEXT = path.join(__dirname, 'CLAUDE_SRE_REMEDIATION_PHASE.md');
+const LOG_FILE = process.env.CLAUDE_LOG || '/tmp/claude-sre.log';
+const APP_PORT = process.env.APP_PORT || '8180';
+const PETCLINIC_LOG = process.env.PETCLINIC_LOG || '/tmp/petclinic.log';
+const DEMO_HOST = process.env.DEMO_HOST || 'thor';
 
 let state = 'idle'; // idle | analyzing | awaiting_choice | executing
 let sseClients = [];
@@ -39,15 +57,36 @@ function setState(newState) {
   broadcast('status', { state, version: getVersion() });
 }
 
+function renderPrompt(filePath) {
+  let text = fs.readFileSync(filePath, 'utf8');
+  const vars = {
+    PETCLINIC_DIR,
+    BUILDS_DIR,
+    APP_PORT,
+    PETCLINIC_LOG,
+    DEPLOY_SCRIPT: path.join(__dirname, 'deploy.sh'),
+    CLOSED_LOOP_DIR: __dirname,
+  };
+  for (const [key, val] of Object.entries(vars)) {
+    text = text.replaceAll(`{{${key}}}`, val);
+  }
+  return text;
+}
+
 function dispatchClaude(prompt, phase, contextFile) {
   return new Promise((resolve, reject) => {
     const logStream = fs.createWriteStream(LOG_FILE, { flags: 'a' });
+    const phaseName = phase === 1 ? 'analysis' : 'remediation';
     const ts = new Date().toISOString();
-    logStream.write(`\n${'='.repeat(60)}\n[${ts}] DISPATCH (phase${phase})\n${'='.repeat(60)}\n`);
+    logStream.write(`\n${'='.repeat(60)}\n[${ts}] DISPATCH (${phaseName})\n${'='.repeat(60)}\n`);
+
+    const rendered = renderPrompt(contextFile);
+    const tmpFile = path.join(os.tmpdir(), `claude-sre-${phaseName}-${Date.now()}.md`);
+    fs.writeFileSync(tmpFile, rendered);
 
     const args = [
       '-p',
-      '--append-system-prompt-file', contextFile,
+      '--append-system-prompt-file', tmpFile,
       '--add-dir', PETCLINIC_DIR,
       '--output-format', 'stream-json',
       '--verbose',
@@ -106,6 +145,7 @@ function dispatchClaude(prompt, phase, contextFile) {
     proc.on('close', (code) => {
       logStream.write(`\n--- session end (exit=${code}) ---\n`);
       logStream.end();
+      try { fs.unlinkSync(tmpFile); } catch {}
       resolve(resultText);
     });
 
@@ -189,7 +229,7 @@ Output ONLY valid JSON matching this schema — no markdown fences, no extra tex
 }`;
 
   try {
-    const result = await dispatchClaude(prompt, 1, PHASE1_CONTEXT);
+    const result = await dispatchClaude(prompt, 1, ANALYSIS_PHASE_CONTEXT);
     let parsed;
     try {
       parsed = JSON.parse(result);
@@ -251,7 +291,7 @@ async function runPhase2(optionId) {
   broadcast('phase2_start', { action: option.action, recommendation: option.recommendation });
 
   try {
-    const result = await dispatchClaude(option.prompt, 2, PHASE2_CONTEXT);
+    const result = await dispatchClaude(option.prompt, 2, REMEDIATION_PHASE_CONTEXT);
     broadcast('phase2_complete', { result, action: option.action });
     setState('idle');
     return { status: 'completed', action: option.action };
@@ -360,7 +400,7 @@ const server = http.createServer(async (req, res) => {
         alarm_name: payload.alarm_name || 'PetClinic Log Error Rate',
         severity: payload.severity || 'Danger',
         status: payload.status || 'OPEN',
-        host: payload.host || 'thor',
+        host: payload.host || DEMO_HOST,
         agent: payload.agent || 'apmia-petclinic|PetClinic|Spring Boot Agent',
         component: payload.component || 'OwnerController',
         message: payload.message || payload.error || 'ArithmeticException: / by zero in OwnerController.showOwner',

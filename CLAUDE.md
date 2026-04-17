@@ -5,24 +5,24 @@ AI-driven incident remediation with human-in-the-loop: DX OI detects an error, f
 ## Architecture
 
 ```
-DX OI Alarm → Webhook POST → Tailscale Funnel → server.js (Node) → Phase 1 Claude (analyze)
+DX OI Alarm → Webhook POST → Tailscale Funnel → server.js (Node) → Analysis Phase Claude
                                                       ↓
                                                   Web UI (SSE)
                                                       ↓
                                               User picks action
                                                       ↓
-                                              Phase 2 Claude (execute)
+                                              Remediation Phase Claude
 ```
 
 - **DX OI tenant:** ITOM-DX-DEMO-DEV (tenant 1857, dxi-na1.saas.broadcom.com)
 - **Demo app:** Spring PetClinic (Java/Spring Boot, H2 in-memory DB)
-- **Server:** Node.js HTTP server on port 5000 (no dependencies)
+- **Server:** Node.js HTTP server (no dependencies), configurable via `.env`
 - **Tunnel:** Tailscale Funnel → `https://thor.tailc6067a.ts.net/`
 - **Web UI:** `http://localhost:5000` — dark-themed SPA with SSE streaming
 
 ## Two-Phase Claude
 
-### Phase 1 — Analysis
+### Analysis Phase
 Claude receives the alarm, reads logs and source code, and outputs structured JSON with:
 - Root cause diagnosis (error type, file, line, user impact, code snippet, log excerpt)
 - 3 remediation options sorted by confidence:
@@ -30,7 +30,7 @@ Claude receives the alarm, reads logs and source code, and outputs structured JS
   2. **Code Fix** — edit source, create branch, commit, open PR via `gh`
   3. **SNOW Ticket** — create a mock ServiceNow ticket JSON file
 
-### Phase 2 — Execution
+### Remediation Phase
 When the user clicks an action button, Claude is dispatched again with that option's prompt to execute it.
 
 ## Files
@@ -41,8 +41,12 @@ When the user clicks an action button, Claude is dispatched again with that opti
 | `public/index.html` | Web UI — trigger card, analysis terminal, RCA panel, option cards |
 | `public/style.css` | Dark-themed styling |
 | `deploy.sh` | Deploy script: copies versioned JAR to active, restarts app |
-| `CLAUDE_SRE_PHASE1.md` | Phase 1 system prompt (diagnose, output JSON) |
-| `CLAUDE_SRE_PHASE2.md` | Phase 2 system prompt (execute chosen action) |
+| `CLAUDE_SRE_ANALYSIS_PHASE.md` | Analysis phase system prompt (diagnose, output JSON) |
+| `CLAUDE_SRE_REMEDIATION_PHASE.md` | Remediation phase system prompt (execute chosen action) |
+| `.env.example` | Configuration template — copy to `.env` |
+| `setup.sh` | Prerequisites checker and `.env` creator |
+| `package.json` | Project metadata and npm scripts |
+| `README.md` | Installation and usage guide |
 | `CLAUDE_SRE.md` | Legacy v1 system prompt (kept for reference) |
 | `webhook-receiver.py` | Legacy v1 Python webhook receiver (kept for reference) |
 | `watch-and-fix.sh` | Alternate log-watcher mode (tails log directly, no webhook) |
@@ -51,8 +55,8 @@ When the user clicks an action button, Claude is dispatched again with that opti
 
 ## Demo App: Spring PetClinic
 
-- **Location:** `/home/duane/dx-do/demo/spring-petclinic/`
-- **Port:** 8180
+- **Location:** configured via `PETCLINIC_DIR` in `.env` (default: `../spring-petclinic`)
+- **Port:** configured via `APP_PORT` in `.env` (default: 8180)
 - **GitHub:** https://github.com/spring-projects/spring-petclinic
 - **Database:** H2 in-memory (resets on restart)
 
@@ -95,8 +99,13 @@ In `OwnerController.java` `showOwner()` method — a "loyalty score" calculation
 ### Start
 
 ```bash
-node server.js > /tmp/demo-server.log 2>&1 &
+npm start
+# or: node server.js > /tmp/demo-server.log 2>&1 &
 ```
+
+### Configuration
+
+All paths and ports are configurable via `.env` (see `.env.example`). Environment variables override `.env` values. Prompt files (`CLAUDE_SRE_ANALYSIS_PHASE.md`, `CLAUDE_SRE_REMEDIATION_PHASE.md`) use `{{PLACEHOLDER}}` tokens that are resolved at runtime by server.js.
 
 ### Endpoints
 
@@ -191,12 +200,12 @@ curl https://thor.tailc6067a.ts.net/health
 
 1. Show the UI — status is idle, version is v1.1
 2. Click "Trigger Simulated Alarm" (or wait for real DX OI alarm)
-3. Watch Phase 1 analysis stream in the terminal panel
+3. Watch the analysis phase stream in the terminal panel
 4. Trigger card shows the alarm details
 5. RCA panel appears with diagnosis (toggle Formatted / Source JSON)
 6. Three remediation cards appear — sorted by confidence, top one is recommended
 7. Click an action button to execute
-8. Phase 2 streams the execution
+8. Remediation phase streams the execution
 9. Completion banner shows result
 
 ### Test without UI
