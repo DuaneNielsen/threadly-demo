@@ -436,6 +436,26 @@ const server = http.createServer(async (req, res) => {
       return jsonResponse(res, 200, { status: 'reset' });
     }
 
+    if (url.pathname === '/deploy') {
+      const version = payload.version || 'v1.1';
+      console.log(`[DEPLOY] Deploying ${version}...`);
+      broadcast('deploy_start', { version });
+      const deployScript = path.join(__dirname, 'deploy.sh');
+      const proc = spawn('bash', [deployScript, version], {
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      let output = '';
+      proc.stdout.on('data', (chunk) => { output += chunk.toString(); });
+      proc.stderr.on('data', (chunk) => { output += chunk.toString(); });
+      proc.on('close', (code) => {
+        const success = code === 0;
+        console.log(`[DEPLOY] ${version} ${success ? 'succeeded' : 'failed'} (exit ${code})`);
+        broadcast('deploy_complete', { version, success, output: output.trim() });
+        broadcast('status', { state, version: getVersion() });
+      });
+      return jsonResponse(res, 200, { status: 'deploying', version });
+    }
+
     return jsonResponse(res, 404, { error: 'Not found' });
   }
 });

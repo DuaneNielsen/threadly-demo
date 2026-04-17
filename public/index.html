@@ -20,9 +20,11 @@
 
   <main>
     <div class="controls">
+      <button class="scenario-btn" id="scenarioBtn" onclick="resetScenario()">Reset Scenario: Bad Code</button>
       <button class="primary" id="simulateBtn" onclick="simulate()">Trigger Simulated Alarm</button>
       <button class="danger" id="resetBtn" onclick="resetState()">Reset</button>
     </div>
+    <div class="toast" id="toast"></div>
 
     <!-- Trigger -->
     <div class="trigger-panel" id="triggerPanel">
@@ -180,6 +182,28 @@ function executeOption(optionId) {
 function resetState() {
   fetch('/reset', { method: 'POST' });
   clearUI();
+}
+
+function showToast(message, type) {
+  const toast = document.getElementById('toast');
+  toast.textContent = message;
+  toast.className = 'toast visible ' + type;
+  clearTimeout(toast._timer);
+  toast._timer = setTimeout(() => toast.classList.remove('visible'), 4000);
+}
+
+function resetScenario() {
+  const btn = document.getElementById('scenarioBtn');
+  btn.disabled = true;
+  btn.textContent = 'Deploying v1.1...';
+  showToast('Deploying buggy version (v1.1)...', 'info');
+  clearUI();
+  fetch('/reset', { method: 'POST' });
+  fetch('/deploy', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ version: 'v1.1' }),
+  });
 }
 
 function renderOptions(diagnosis, options) {
@@ -345,6 +369,18 @@ function connect() {
     completionBanner.classList.add('visible', 'success');
     document.getElementById('completionIcon').textContent = '\u2713';
     document.getElementById('completionText').textContent = `${ACTION_LABELS[d.action] || d.action} completed successfully`;
+  });
+
+  evtSource.addEventListener('deploy_complete', (e) => {
+    const d = JSON.parse(e.data);
+    const btn = document.getElementById('scenarioBtn');
+    btn.disabled = false;
+    btn.textContent = 'Reset Scenario: Bad Code';
+    if (d.success) {
+      showToast('Scenario ready — v1.1 (buggy) deployed', 'success');
+    } else {
+      showToast('Deploy failed: ' + (d.output || 'unknown error').slice(0, 100), 'error');
+    }
   });
 
   evtSource.addEventListener('error', (e) => {

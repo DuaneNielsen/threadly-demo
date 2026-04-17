@@ -115,12 +115,48 @@ button.primary {
 
 button.primary:hover { opacity: 0.9; }
 
+button.scenario-btn {
+  background: var(--accent-orange);
+  border-color: var(--accent-orange);
+  color: #000;
+  font-weight: 600;
+}
+
+button.scenario-btn:hover { opacity: 0.9; }
+
 button.danger {
   border-color: var(--accent-red);
   color: var(--accent-red);
 }
 
 button.danger:hover { background: var(--accent-red); color: #fff; }
+
+/* Toast notification */
+.toast {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%) translateY(20px);
+  padding: 12px 24px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s, transform 0.3s;
+  z-index: 1000;
+  border: 1px solid;
+}
+
+.toast.visible {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+  pointer-events: auto;
+}
+
+.toast.info { background: rgba(88,166,255,0.15); border-color: var(--accent-blue); color: var(--accent-blue); }
+.toast.success { background: rgba(63,185,80,0.15); border-color: var(--accent-green); color: var(--accent-green); }
+.toast.error { background: rgba(248,81,73,0.15); border-color: var(--accent-red); color: var(--accent-red); }
 
 /* Terminal */
 .terminal {
