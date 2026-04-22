@@ -1,24 +1,28 @@
 # Closed-Loop Remediation Demo (v2)
 
-AI-driven incident remediation with human-in-the-loop: DX OI detects an error, fires a webhook, Claude Code diagnoses the issue and presents remediation options, the user picks an action, and Claude executes it.
+AI-driven incident remediation with human-in-the-loop: monitoring detects an error, fires a webhook, Claude Code diagnoses the issue and presents remediation options, the user picks an action, and Claude executes it.
 
 ## Architecture
 
 ```
-DX OI Alarm → Webhook POST → Tailscale Funnel → server.js (Node) → Analysis Phase Claude
-                                                      ↓
-                                                  Web UI (SSE)
-                                                      ↓
-                                              User picks action
-                                                      ↓
-                                              Remediation Phase Claude
+PetClinic log → Fluent Bit (tail) ──→ Loki (storage) → Grafana (dashboard)
+                     │
+                     └─ ERROR match → webhook POST → server.js (Node) → Analysis Phase Claude
+                                                           ↓
+                                                       Web UI (SSE)
+                                                           ↓
+                                                   User picks action
+                                                           ↓
+                                                   Remediation Phase Claude
 ```
 
-- **DX OI tenant:** ITOM-DX-DEMO-DEV (tenant 1857, dxi-na1.saas.broadcom.com)
+- **Monitoring:** Fluent Bit + Loki + Grafana (docker-compose in `monitoring/`)
 - **Demo app:** Spring PetClinic (Java/Spring Boot, H2 in-memory DB)
 - **Server:** Node.js HTTP server (no dependencies), configurable via `.env`
-- **Tunnel:** Tailscale Funnel → `https://thor.tailc6067a.ts.net/`
+- **Tunnel:** Tailscale Funnel → `https://thor.tailc6067a.ts.net/` (optional, for remote webhooks)
 - **Web UI:** `http://localhost:5000` — dark-themed SPA with SSE streaming
+- **Grafana:** `http://localhost:3001` — PetClinic Logs dashboard (anonymous access)
+- **DX OI tenant (optional):** ITOM-DX-DEMO-DEV (tenant 1857, dxi-na1.saas.broadcom.com)
 
 ## Two-Phase Claude
 
@@ -146,6 +150,49 @@ idle → analyzing → awaiting_choice → executing → idle
 | `phase2_complete` | Result |
 | `error` | Error messages |
 
+## Monitoring Stack (Fluent Bit + Loki + Grafana)
+
+All containers live in `monitoring/` and are managed via docker-compose.
+
+```bash
+cd monitoring
+docker compose up -d      # start all
+docker compose down        # stop all
+docker compose logs -f     # follow logs
+```
+
+### Components
+
+| Service | Image | Port | Purpose |
+|---------|-------|------|---------|
+| Fluent Bit | `fluent/fluent-bit:4.0` | - | Tails petclinic.log, ships to Loki, webhooks ERRORs |
+| Loki | `grafana/loki:3.4.2` | 3100 | Log storage/query |
+| Grafana | `grafana/grafana:11.6.0` | 3001 (configurable via `GRAFANA_PORT`) | Dashboard UI (anonymous admin access) |
+
+### How it works
+
+Fluent Bit runs two independent tail pipelines on the same log file:
+1. **Loki pipeline** — all log lines ship to Loki for storage and Grafana dashboards
+2. **Webhook pipeline** — ERROR lines are filtered, transformed via Lua into the webhook payload format, and POSTed to `http://host.docker.internal:5000/webhook`
+
+The webhook fires within ~1-2 seconds of an ERROR appearing in the log.
+
+### Grafana Dashboard
+
+Pre-provisioned at `http://localhost:3001/d/petclinic/petclinic-logs`:
+- Total Errors (stat panel)
+- Error Rate (time series)
+- Log Volume by Level (bar chart)
+- Log Stream (all logs)
+- Error Log Lines (filtered)
+
+### Configuration
+
+Fluent Bit config: `monitoring/fluent-bit/fluent-bit.conf`
+Webhook payload transform: `monitoring/fluent-bit/webhook.lua`
+Grafana datasource: `monitoring/grafana/provisioning/datasources/loki.yml`
+Dashboard JSON: `monitoring/grafana/provisioning/dashboards/petclinic.json`
+
 ## Tailscale Funnel
 
 Exposes the server to the public internet so DX OI can reach it.
@@ -191,8 +238,9 @@ curl https://thor.tailc6067a.ts.net/health
 
 1. Deploy the buggy version: `./deploy.sh v1.1`
 2. Verify bug: `curl -s -o /dev/null -w "%{http_code}" http://localhost:8180/owners/1` → 500
-3. Start server: `node server.js > /tmp/demo-server.log 2>&1 &`
-4. Start Funnel: `tailscale funnel 5000`
+3. Start monitoring: `cd monitoring && docker compose up -d`
+4. Start server: `node server.js > /tmp/demo-server.log 2>&1 &`
+5. (Optional) Start Funnel: `tailscale funnel 5000`
 5. Verify: `curl https://thor.tailc6067a.ts.net/health`
 6. Open UI: `http://localhost:5000`
 

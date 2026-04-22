@@ -309,6 +309,9 @@ function connect() {
 
   evtSource.addEventListener('status', (e) => {
     const d = JSON.parse(e.data);
+    if (d.state === 'analyzing' && statusText.textContent !== 'Analyzing...') {
+      clearUI();
+    }
     updateStatus(d.state, d.version);
   });
 

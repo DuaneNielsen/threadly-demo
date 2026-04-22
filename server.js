@@ -121,12 +121,6 @@ function dispatchClaude(prompt, phase, contextFile) {
         for (const block of content) {
           if (block.type === 'text' && block.text) {
             if (phase === 1 && block.text.includes('"diagnosis"')) {
-              const jsonStart = block.text.indexOf('{');
-              if (jsonStart < 0) {
-                broadcast(`${prefix}_stream`, { text: block.text });
-              } else if (jsonStart > 0) {
-                broadcast(`${prefix}_stream`, { text: block.text.slice(0, jsonStart).trimEnd() });
-              }
               continue;
             }
             broadcast(`${prefix}_stream`, { text: block.text });
@@ -381,6 +375,7 @@ const server = http.createServer(async (req, res) => {
     catch { return jsonResponse(res, 400, { error: 'Invalid JSON' }); }
 
     if (url.pathname === '/webhook') {
+      if (Array.isArray(payload)) payload = payload[0] || {};
       const triggerInfo = {
         alarm_name: payload.alarm_name || payload['Alarm Name'] || payload.alarmName || 'Unknown',
         severity: payload.severity || payload['Severity'] || 'Unknown',
