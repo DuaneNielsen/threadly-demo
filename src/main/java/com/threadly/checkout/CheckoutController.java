@@ -52,9 +52,24 @@ public class CheckoutController {
         model.addAttribute("lines", lines);
         model.addAttribute("totals", totalsCalculator.compute(lines));
         if (!model.containsAttribute("form")) {
-            model.addAttribute("form", new CheckoutForm());
+            model.addAttribute("form", defaultForm());
         }
         return "checkout/form";
+    }
+
+    private static CheckoutForm defaultForm() {
+        CheckoutForm f = new CheckoutForm();
+        f.setEmail("demo@threadly.test");
+        f.setShipName("Demo User");
+        f.setShipAddr1("1 Demo Street");
+        f.setShipCity("San Francisco");
+        f.setShipState("CA");
+        f.setShipZip("94105");
+        f.setCardNumber("4242424242424242");
+        f.setCardExpMonth(12);
+        f.setCardExpYear(2030);
+        f.setCardCvc("123");
+        return f;
     }
 
     @PostMapping
