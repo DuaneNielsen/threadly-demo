@@ -12,6 +12,9 @@ public class DiscountCalculator {
      * Returns 0 if there is no original price (no markdown).
      */
     public BigDecimal percentOff(BigDecimal originalPrice, BigDecimal salePrice) {
+        if (originalPrice == null || originalPrice.signum() == 0) {
+            return BigDecimal.ZERO;
+        }
         BigDecimal diff = originalPrice.subtract(salePrice);
         return diff.divide(originalPrice, 4, RoundingMode.HALF_UP)
                    .multiply(BigDecimal.valueOf(100))
