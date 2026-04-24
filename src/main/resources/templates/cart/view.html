@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="en">
+<head th:replace="~{fragments/layout :: head('Cart - Threadly')}"></head>
+<body>
+<header th:replace="~{fragments/layout :: header}"></header>
+
+<main class="wrap cart">
+    <h1>Your cart</h1>
+
+    <div th:if="${lines.isEmpty()}" class="cart-empty">
+        <p>Your cart is empty.</p>
+        <a class="btn-primary" th:href="@{/products}">Keep shopping</a>
+    </div>
+
+    <div th:unless="${lines.isEmpty()}">
+        <table class="cart-table">
+            <thead>
+            <tr>
+                <th colspan="2">Item</th>
+                <th>Price</th>
+                <th>Qty</th>
+                <th>Line total</th>
+                <th></th>
+            </tr>
+            </thead>
+            <tbody>
+            <tr th:each="line : ${lines}">
+                <td class="cart-img-cell">
+                    <img th:src="@{${line.product.imageUrl}}" th:alt="${line.product.name}"/>
+                </td>
+                <td>
+                    <a th:href="@{/products/{id}(id=${line.product.id})}" th:text="${line.product.name}">Item</a>
+                    <div class="cart-meta">
+                        <span th:text="${line.product.color}">color</span>
+                        <span>&middot;</span>
+                        <span th:text="${line.product.size}">size</span>
+                    </div>
+                </td>
+                <td th:text="'$' + ${#numbers.formatDecimal(line.product.price, 1, 2)}">$24.00</td>
+                <td>
+                    <form method="post" th:action="@{/cart/update}" class="qty-form">
+                        <input type="hidden" name="id" th:value="${line.product.id}"/>
+                        <input type="number" name="qty" min="0" max="99" th:value="${line.qty}"/>
+                        <button type="submit" class="btn-secondary btn-small">Update</button>
+                    </form>
+                </td>
+                <td th:text="'$' + ${#numbers.formatDecimal(line.lineTotal, 1, 2)}">$24.00</td>
+                <td>
+                    <form method="post" th:action="@{/cart/remove/{id}(id=${line.product.id})}">
+                        <button type="submit" class="btn-link">Remove</button>
+                    </form>
+                </td>
+            </tr>
+            </tbody>
+        </table>
+
+        <aside class="cart-totals">
+            <div><span>Subtotal</span><span th:text="'$' + ${#numbers.formatDecimal(totals.subtotal, 1, 2)}">$0.00</span></div>
+            <div><span>Shipping</span><span th:text="'$' + ${#numbers.formatDecimal(totals.shipping, 1, 2)}">$5.00</span></div>
+            <div><span>Tax</span><span th:text="'$' + ${#numbers.formatDecimal(totals.tax, 1, 2)}">$0.00</span></div>
+            <div class="cart-total-line"><span>Total</span><span th:text="'$' + ${#numbers.formatDecimal(totals.total, 1, 2)}">$0.00</span></div>
+            <a class="btn-primary btn-block" th:href="@{/checkout}">Checkout</a>
+        </aside>
+    </div>
+</main>
+
+<footer th:replace="~{fragments/layout :: footer}"></footer>
+</body>
+</html>

@@ -17,6 +17,10 @@
             <a th:href="@{/products}">Shop</a>
             <a href="#">Journal</a>
             <a href="#">Account</a>
+            <a th:href="@{/cart}" class="cart-link">
+                Cart
+                <span class="cart-badge" th:if="${cartCount != null and cartCount > 0}" th:text="${cartCount}">0</span>
+            </a>
         </nav>
     </div>
 </header>

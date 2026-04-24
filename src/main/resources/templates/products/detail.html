@@ -27,7 +27,9 @@
                       th:if="${percentOff != null and percentOff.signum() > 0}"
                       th:text="${percentOff} + '% off'">20% off</span>
             </div>
-            <button class="btn-primary">Add to cart</button>
+            <form method="post" th:action="@{/cart/add/{id}(id=${product.id})}">
+                <button type="submit" class="btn-primary">Add to cart</button>
+            </form>
         </div>
     </div>
 </main>

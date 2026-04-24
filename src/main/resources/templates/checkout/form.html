@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="en">
+<head th:replace="~{fragments/layout :: head('Checkout - Threadly')}"></head>
+<body>
+<header th:replace="~{fragments/layout :: header}"></header>
+
+<main class="wrap checkout">
+    <h1>Checkout</h1>
+
+    <div class="checkout-error" th:if="${paymentError != null}" th:text="${paymentError}">Payment error</div>
+
+    <form method="post" th:action="@{/checkout}" th:object="${form}" class="checkout-grid">
+        <section class="checkout-col">
+            <h2>Contact</h2>
+            <label>Email
+                <input type="email" th:field="*{email}" required/>
+            </label>
+
+            <h2>Shipping</h2>
+            <label>Full name
+                <input type="text" th:field="*{shipName}" required/>
+            </label>
+            <label>Address
+                <input type="text" th:field="*{shipAddr1}" required/>
+            </label>
+            <label>Apt / suite (optional)
+                <input type="text" th:field="*{shipAddr2}"/>
+            </label>
+            <div class="checkout-row">
+                <label class="grow">City
+                    <input type="text" th:field="*{shipCity}" required/>
+                </label>
+                <label>State
+                    <input type="text" th:field="*{shipState}" required maxlength="32"/>
+                </label>
+                <label>ZIP
+                    <input type="text" th:field="*{shipZip}" required maxlength="16"/>
+                </label>
+            </div>
+        </section>
+
+        <section class="checkout-col">
+            <h2>Payment</h2>
+            <label>Card number
+                <input type="text" th:field="*{cardNumber}" required placeholder="4242 4242 4242 4242" autocomplete="cc-number"/>
+            </label>
+            <div class="checkout-row">
+                <label>Exp month
+                    <input type="number" th:field="*{cardExpMonth}" required min="1" max="12" placeholder="12"/>
+                </label>
+                <label>Exp year
+                    <input type="number" th:field="*{cardExpYear}" required min="2026" max="2040" placeholder="2030"/>
+                </label>
+                <label>CVC
+                    <input type="text" th:field="*{cardCvc}" required maxlength="4" placeholder="123"/>
+                </label>
+            </div>
+            <p class="checkout-hint">Test cards: <code>4242 4242 4242 4242</code> (success) &middot; <code>4000 0000 0000 0002</code> (decline).</p>
+
+            <h2>Order summary</h2>
+            <ul class="checkout-summary">
+                <li th:each="line : ${lines}">
+                    <span th:text="${line.qty} + ' &times; ' + ${line.product.name}">2 x Item</span>
+                    <span th:text="'$' + ${#numbers.formatDecimal(line.lineTotal, 1, 2)}">$0.00</span>
+                </li>
+            </ul>
+            <div class="cart-totals">
+                <div><span>Subtotal</span><span th:text="'$' + ${#numbers.formatDecimal(totals.subtotal, 1, 2)}">$0.00</span></div>
+                <div><span>Shipping</span><span th:text="'$' + ${#numbers.formatDecimal(totals.shipping, 1, 2)}">$5.00</span></div>
+                <div><span>Tax</span><span th:text="'$' + ${#numbers.formatDecimal(totals.tax, 1, 2)}">$0.00</span></div>
+                <div class="cart-total-line"><span>Total</span><span th:text="'$' + ${#numbers.formatDecimal(totals.total, 1, 2)}">$0.00</span></div>
+            </div>
+
+            <button type="submit" class="btn-primary btn-block">Place order</button>
+        </section>
+    </form>
+</main>
+
+<footer th:replace="~{fragments/layout :: footer}"></footer>
+</body>
+</html>

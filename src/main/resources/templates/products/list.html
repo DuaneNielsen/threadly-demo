@@ -32,6 +32,9 @@
                     </div>
                 </div>
             </a>
+            <form method="post" th:action="@{/cart/add/{id}(id=${p.id})}" class="card-add">
+                <button type="submit" class="btn-secondary btn-small">Add to cart</button>
+            </form>
         </article>
     </section>
 </main>
