@@ -35,6 +35,12 @@ const APP_PORT = process.env.APP_PORT || '8180';
 const APP_LOG = process.env.APP_LOG || '/tmp/threadly.log';
 const DEMO_HOST = process.env.DEMO_HOST || 'thor';
 const DEMO_TITLE = process.env.DEMO_TITLE || 'Threadly - Closed-Loop Remediation';
+const PAYMENTS_DIR = path.resolve(__dirname, process.env.PAYMENTS_DIR || '../threadly-payments');
+const PAYMENTS_BUILDS_DIR = path.resolve(__dirname, process.env.PAYMENTS_BUILDS_DIR || '../threadly-payments/builds');
+const PAYMENTS_NAME = process.env.PAYMENTS_NAME || 'ThreadlyPayments';
+const PAYMENTS_PORT = process.env.PAYMENTS_PORT || '8181';
+const PAYMENTS_LOG = process.env.PAYMENTS_LOG || '/tmp/payments.log';
+const PAYMENTS_URL = process.env.PAYMENTS_URL || 'http://localhost:8181';
 
 let state = 'idle'; // idle | analyzing | awaiting_choice | executing
 let sseClients = [];
@@ -72,6 +78,13 @@ function renderPrompt(filePath) {
     APP_LOG,
     DEPLOY_SCRIPT: path.join(__dirname, 'deploy.sh'),
     CLOSED_LOOP_DIR: __dirname,
+    PAYMENTS_DIR,
+    PAYMENTS_BUILDS_DIR,
+    PAYMENTS_NAME,
+    PAYMENTS_PORT,
+    PAYMENTS_LOG,
+    PAYMENTS_URL,
+    PAYMENTS_DEPLOY_SCRIPT: path.join(__dirname, 'deploy-payments.sh'),
   };
   for (const [key, val] of Object.entries(vars)) {
     text = text.replaceAll(`{{${key}}}`, val);
@@ -94,6 +107,7 @@ function dispatchClaude(prompt, phase, contextFile) {
       '-p',
       '--append-system-prompt-file', tmpFile,
       '--add-dir', APP_DIR,
+      '--add-dir', PAYMENTS_DIR,
       '--output-format', 'stream-json',
       '--verbose',
     ];

@@ -10,19 +10,17 @@ if [ -f "$SCRIPT_DIR/.env" ]; then
     set +a
 fi
 
-BUILDS_DIR="${BUILDS_DIR:-../builds}"
+BUILDS_DIR="${PAYMENTS_BUILDS_DIR:-../threadly-payments/builds}"
 # Resolve relative paths against script directory
 if [[ "$BUILDS_DIR" != /* ]]; then
     BUILDS_DIR="$(cd "$SCRIPT_DIR/$BUILDS_DIR" && pwd)"
 fi
 ACTIVE_DIR="$BUILDS_DIR/active"
-JAR_NAME="${APP_JAR_NAME:-threadly.jar}"
-APP_PORT="${APP_PORT:-8180}"
-LOG_FILE="${APP_LOG:-/tmp/threadly.log}"
-STDOUT_LOG="${APP_STDOUT_LOG:-/tmp/threadly-stdout.log}"
-APP_NAME="${APP_NAME:-Threadly}"
-APP_PROFILES="${APP_PROFILES:-}"
-PAYMENTS_URL="${PAYMENTS_URL:-http://localhost:8181}"
+JAR_NAME="${PAYMENTS_JAR_NAME:-threadly-payments.jar}"
+PAYMENTS_PORT="${PAYMENTS_PORT:-8181}"
+LOG_FILE="${PAYMENTS_LOG:-/tmp/payments.log}"
+STDOUT_LOG="${PAYMENTS_STDOUT_LOG:-/tmp/payments-stdout.log}"
+APP_NAME="${PAYMENTS_NAME:-ThreadlyPayments}"
 
 usage() {
     echo "Usage: $0 <version>"
@@ -46,8 +44,7 @@ fi
 
 echo "=== Deploying $APP_NAME $VERSION ==="
 
-# Kill existing process
-PID=$(lsof -ti:$APP_PORT 2>/dev/null || true)
+PID=$(lsof -ti:$PAYMENTS_PORT 2>/dev/null || true)
 if [ -n "$PID" ]; then
     echo "Stopping current instance (PID $PID)..."
     kill "$PID" 2>/dev/null || true
@@ -58,36 +55,25 @@ if [ -n "$PID" ]; then
     fi
 fi
 
-# Copy JAR
 mkdir -p "$ACTIVE_DIR"
 echo "Copying $VERSION JAR to active..."
 cp "$SOURCE_JAR" "$ACTIVE_DIR/$JAR_NAME"
 echo "$VERSION" > "$ACTIVE_DIR/version.txt"
 
-# Truncate log so Fluent Bit only sees fresh lines from this version
 : > "$LOG_FILE"
 
-# Start
 echo "Starting $APP_NAME $VERSION..."
-PROFILE_ARG=""
-if [ -n "$APP_PROFILES" ]; then
-    PROFILE_ARG="--spring.profiles.active=$APP_PROFILES"
-fi
-
 java -jar "$ACTIVE_DIR/$JAR_NAME" \
-    --server.port=$APP_PORT \
+    --server.port=$PAYMENTS_PORT \
     --logging.file.name="$LOG_FILE" \
-    --payments.url="$PAYMENTS_URL" \
-    $PROFILE_ARG \
     > "$STDOUT_LOG" 2>&1 &
 
 NEW_PID=$!
 echo "Started PID $NEW_PID"
 
-# Wait for health
 echo "Waiting for health check..."
 for i in $(seq 1 60); do
-    if curl -sf http://localhost:$APP_PORT/actuator/health > /dev/null 2>&1; then
+    if curl -sf http://localhost:$PAYMENTS_PORT/actuator/health > /dev/null 2>&1; then
         echo "=== $APP_NAME $VERSION is UP (took ${i}s) ==="
         exit 0
     fi

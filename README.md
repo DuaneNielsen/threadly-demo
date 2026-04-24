@@ -2,7 +2,7 @@
 
 AI-driven incident remediation with human-in-the-loop: DX Operational Intelligence (or Fluent Bit) detects an error, fires a webhook, Claude Code diagnoses the issue and presents remediation options, the user picks an action, and Claude executes it.
 
-Demo app: **Threadly** — a three-tier Spring Boot t-shirt store with a divide-by-zero bug planted in its discount calculator. Tagline: "threads never drop."
+Demo apps: **Threadly** — a Spring Boot t-shirt store with cart + checkout, and **threadly-payments** — a Stripe-style fake payment service it calls. A divide-by-zero bug is planted in Threadly's discount calculator, and the payment service has a card number (`4000 0000 0000 0119`) that triggers 500s for future bug planting. Tagline: "threads never drop."
 
 ## Prerequisites
 
@@ -39,6 +39,14 @@ All settings are in `.env` (copied from `.env.example` by setup). Environment va
 | `APP_LOG` | `/tmp/threadly.log` | App log file (tailed by Fluent Bit) |
 | `APP_STDOUT_LOG` | `/tmp/threadly-stdout.log` | App stdout log |
 | `APP_PROFILES` | `h2` | Spring profile (`h2` for embedded, empty for Postgres) |
+| `PAYMENTS_DIR` | `../threadly-payments` | Path to the payment service repo |
+| `PAYMENTS_BUILDS_DIR` | `../threadly-payments/builds` | Path to versioned JAR builds for payments |
+| `PAYMENTS_NAME` | `ThreadlyPayments` | Display name for the payment service |
+| `PAYMENTS_PORT` | `8181` | Payment service port |
+| `PAYMENTS_JAR_NAME` | `threadly-payments.jar` | JAR filename in `PAYMENTS_BUILDS_DIR/vN.N/` |
+| `PAYMENTS_LOG` | `/tmp/payments.log` | Payment service log (tailed by Fluent Bit) |
+| `PAYMENTS_STDOUT_LOG` | `/tmp/payments-stdout.log` | Payment service stdout |
+| `PAYMENTS_URL` | `http://localhost:8181` | URL passed to Threadly for payment calls |
 | `CLAUDE_LOG` | `/tmp/claude-sre.log` | Claude session log |
 | `DEMO_HOST` | `thor` | Hostname in simulated alarms |
 | `DEMO_TITLE` | `Threadly Closed-Loop Remediation` | Web UI title |
@@ -51,19 +59,26 @@ The demo expects this sibling structure:
 
 ```
 projects/
-├── agentic-sre-demo/           # this directory
+├── agentic-sre-demo/              # this directory
 │   ├── server.js
-│   ├── deploy.sh
-│   ├── monitoring/             # Fluent Bit + Loki + Grafana
+│   ├── deploy.sh                  # deploys Threadly
+│   ├── deploy-payments.sh         # deploys the payment service
+│   ├── monitoring/                # Fluent Bit + Loki + Grafana
 │   └── ...
-└── threadly/
-    ├── src/                    # Spring Boot source
+├── threadly/                      # t-shirt store (cart, checkout, orders)
+│   ├── src/
+│   ├── pom.xml
+│   ├── docker-compose.yml         # Postgres (optional)
+│   └── builds/
+│       ├── v1.0/threadly.jar      # clean
+│       ├── v1.1/threadly.jar      # planted bug
+│       └── active/
+└── threadly-payments/             # fake Stripe-style PSP
+    ├── src/
     ├── pom.xml
-    ├── docker-compose.yml      # Postgres (optional)
     └── builds/
-        ├── v1.0/threadly.jar   # clean
-        ├── v1.1/threadly.jar   # planted bug
-        └── active/             # deploy.sh swaps in here
+        ├── v1.0/threadly-payments.jar
+        └── active/
 ```
 
 ## Demo Runbook
@@ -71,10 +86,12 @@ projects/
 ### Setup
 
 1. Start the monitoring stack: `cd monitoring && docker compose up -d`
-2. Deploy the buggy version: `./deploy.sh v1.1`
-3. Verify: `curl -s -o /dev/null -w "%{http_code}" http://localhost:8180/products/7` should return `500` (freebie triggers the divide-by-zero)
-4. Start server: `npm start`
-5. Open `http://localhost:5000`
+2. Deploy the payment service: `./deploy-payments.sh v1.0`
+3. Deploy the buggy Threadly version: `./deploy.sh v1.1`
+4. Verify: `curl -s -o /dev/null -w "%{http_code}" http://localhost:8180/products/7` should return `500` (freebie triggers the divide-by-zero)
+5. Verify payments: `curl -s http://localhost:8181/actuator/health`
+6. Start server: `npm start`
+7. Open `http://localhost:5000`
 
 ### Run
 

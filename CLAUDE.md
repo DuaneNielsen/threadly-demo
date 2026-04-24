@@ -5,23 +5,28 @@ AI-driven incident remediation with human-in-the-loop: monitoring detects an err
 ## Architecture
 
 ```
-Threadly log → Fluent Bit (tail) ──→ Loki (storage) → Grafana (dashboard)
-                    │
-                    └─ ERROR match → webhook POST → server.js (Node) → Analysis Phase Claude
-                                                          ↓
-                                                      Web UI (SSE)
-                                                          ↓
-                                                  User picks action
-                                                          ↓
-                                                  Remediation Phase Claude
+ +---------+          +------------+     HTTP     +---------------------+
+ | Browser | -------> |  Threadly  | -----------> |  threadly-payments  |
+ +---------+  :8180   |  (store)   |    :8181     |   (fake PSP)        |
+                      +------------+              +---------------------+
+                            |                             |
+                     /tmp/threadly.log             /tmp/payments.log
+                            |                             |
+                            +------ Fluent Bit -----------+
+                                       |
+                                    Loki / Grafana (:3001)
+                                       |
+                                    webhook -> server.js (:5000) -> Claude
 ```
 
 - **Monitoring:** Fluent Bit + Loki + Grafana (docker-compose in `monitoring/`)
-- **Demo app:** Threadly — three-tier Spring Boot t-shirt store (`/home/duane/projects/threadly/`). Tagline: "threads never drop."
+- **Demo apps:**
+  - **Threadly** — Spring Boot t-shirt store with cart/checkout/orders (`/home/duane/projects/threadly/`, port 8180). Tagline: "threads never drop."
+  - **threadly-payments** — Stripe-style fake PSP (`/home/duane/projects/threadly-payments/`, port 8181) called by Threadly's `PaymentClient`.
 - **Server:** Node.js HTTP server (no dependencies), configurable via `.env`
 - **Tunnel:** Tailscale Funnel → `https://thor.tailc6067a.ts.net/` (optional, for remote webhooks)
 - **Web UI:** `http://localhost:5000` — dark-themed SPA with SSE streaming
-- **Grafana:** `http://localhost:3001` — Threadly Logs dashboard (anonymous access)
+- **Grafana:** `http://localhost:3001` — Threadly + Payments logs dashboard (anonymous access)
 - **DX OI tenant (optional):** ITOM-DX-DEMO-DEV (tenant 1857, dxi-na1.saas.broadcom.com)
 
 ## Two-Phase Claude
@@ -44,7 +49,8 @@ When the user clicks an action button, Claude is dispatched again with that opti
 | `server.js` | Node.js server: webhook receiver, Claude dispatch, SSE, web UI |
 | `public/index.html` | Web UI — trigger card, analysis terminal, RCA panel, option cards |
 | `public/style.css` | Dark-themed styling |
-| `deploy.sh` | Deploy script: copies versioned JAR to active, restarts app |
+| `deploy.sh` | Deploy Threadly: copies versioned JAR to active, restarts app, passes `--payments.url` |
+| `deploy-payments.sh` | Deploy threadly-payments: same pattern, port 8181 |
 | `CLAUDE_SRE_ANALYSIS_PHASE.md` | Analysis phase system prompt (diagnose, output JSON) |
 | `CLAUDE_SRE_REMEDIATION_PHASE.md` | Remediation phase system prompt (execute chosen action) |
 | `.env.example` | Configuration template — copy to `.env` |
@@ -57,38 +63,51 @@ When the user clicks an action button, Claude is dispatched again with that opti
 | `tail-sre.py` | Pretty-printer for `/tmp/claude-sre.log` |
 | `dxoi-channel-import.json` | DX OI channel/policy import config |
 
-## Demo App: Threadly
+## Demo Apps
 
-- **Location:** configured via `APP_DIR` in `.env` (default: `../threadly`)
-- **Port:** configured via `APP_PORT` in `.env` (default: 8180)
+### Threadly (storefront)
+
+- **Location:** `APP_DIR` (default `../threadly`)
+- **Port:** `APP_PORT` (default 8180)
 - **Framework:** Spring Boot 3.4, Thymeleaf, JPA/Hibernate
 - **Database:** PostgreSQL (via `docker-compose.yml` in `APP_DIR`) for the default profile; H2 in-memory for `h2` profile
 - **Java:** 21
+- Calls threadly-payments via `PaymentClient` (URL from `payments.url`; `deploy.sh` passes `--payments.url=$PAYMENTS_URL`)
+
+### threadly-payments (fake PSP)
+
+- **Location:** `PAYMENTS_DIR` (default `../threadly-payments`)
+- **Port:** `PAYMENTS_PORT` (default 8181)
+- **Framework:** Spring Boot 3.4, JPA/Hibernate (H2 in-memory)
+- **Java:** 21
+- **API:** `POST /v1/charges`, `GET /v1/charges/{id}`, `GET /actuator/health`
+- **Test cards:** `4242...` succeeds, `4000...0002` = card_declined, `4000...9995` = insufficient_funds, `4000...0069` = expired_card, `4000...0119` = 500 (future bug-plant surface)
 
 ### Versioning
 
-Two git tags in the threadly repo:
-- **v1.0** — clean, no bugs
-- **v1.1** — contains the divide-by-zero bug in `DiscountCalculator.java`
+Both services have git tags `v1.0` (clean) and `v1.1` (buggy where applicable). Threadly v1.1 has the divide-by-zero bug; payments currently has a single v1.0 JAR.
 
 Pre-built JARs:
 ```
-threadly/builds/
-├── v1.0/threadly.jar
-├── v1.1/threadly.jar
-└── active/
-    ├── threadly.jar    # copy of whichever version is deployed
-    └── version.txt     # "v1.0" or "v1.1"
+threadly/builds/v1.0/threadly.jar                   # clean (+ checkout)
+threadly/builds/v1.1/threadly.jar                   # planted bug (+ checkout)
+threadly/builds/active/...                          # deploy.sh swaps here
+threadly-payments/builds/v1.0/threadly-payments.jar
+threadly-payments/builds/active/...                 # deploy-payments.sh swaps here
 ```
 
 ### Deploy
 
 ```bash
-# Deploy a version (kills running app, copies JAR, starts, waits for health)
+# Payment service first (Threadly needs it)
+./deploy-payments.sh v1.0
+
+# Then Threadly
 ./deploy.sh v1.1
 
-# Check what's deployed
+# Check deployed versions
 cat ../threadly/builds/active/version.txt
+cat ../threadly-payments/builds/active/version.txt
 ```
 
 ### The Bug
@@ -110,7 +129,13 @@ npm start
 
 ### Configuration
 
-All paths and ports are configurable via `.env` (see `.env.example`). Environment variables override `.env` values. Prompt files (`CLAUDE_SRE_ANALYSIS_PHASE.md`, `CLAUDE_SRE_REMEDIATION_PHASE.md`) use `{{PLACEHOLDER}}` tokens that are resolved at runtime by server.js. Placeholders: `{{APP_DIR}}`, `{{APP_NAME}}`, `{{APP_PORT}}`, `{{APP_LOG}}`, `{{BUILDS_DIR}}`, `{{DEPLOY_SCRIPT}}`, `{{CLOSED_LOOP_DIR}}`.
+All paths and ports are configurable via `.env` (see `.env.example`). Environment variables override `.env` values. Prompt files (`CLAUDE_SRE_ANALYSIS_PHASE.md`, `CLAUDE_SRE_REMEDIATION_PHASE.md`) use `{{PLACEHOLDER}}` tokens resolved at runtime by server.js:
+
+- Threadly: `{{APP_DIR}}`, `{{APP_NAME}}`, `{{APP_PORT}}`, `{{APP_LOG}}`, `{{BUILDS_DIR}}`, `{{DEPLOY_SCRIPT}}`
+- Payments: `{{PAYMENTS_DIR}}`, `{{PAYMENTS_NAME}}`, `{{PAYMENTS_PORT}}`, `{{PAYMENTS_LOG}}`, `{{PAYMENTS_BUILDS_DIR}}`, `{{PAYMENTS_DEPLOY_SCRIPT}}`, `{{PAYMENTS_URL}}`
+- Shared: `{{CLOSED_LOOP_DIR}}`
+
+`server.js` passes BOTH `APP_DIR` and `PAYMENTS_DIR` via `--add-dir` so Claude can read both codebases.
 
 ### Endpoints
 
@@ -166,7 +191,7 @@ docker compose logs -f     # follow logs
 
 | Service | Image | Port | Purpose |
 |---------|-------|------|---------|
-| Fluent Bit | `fluent/fluent-bit:4.0` | - | Tails `threadly.log`, ships to Loki, webhooks ERRORs |
+| Fluent Bit | `fluent/fluent-bit:4.0` | - | Tails `threadly.log` + `payments.log`, ships to Loki, webhooks ERRORs for both |
 | Loki | `grafana/loki:3.4.2` | 3100 | Log storage/query |
 | Grafana | `grafana/grafana:11.6.0` | 3001 (configurable via `GRAFANA_PORT`) | Dashboard UI (anonymous admin access) |
 
@@ -237,13 +262,15 @@ curl https://thor.tailc6067a.ts.net/health
 
 ### Setup (before demo)
 
-1. Deploy the buggy version: `./deploy.sh v1.1`
-2. Verify bug: `curl -s -o /dev/null -w "%{http_code}" http://localhost:8180/products/7` → 500
-3. Start monitoring: `cd monitoring && docker compose up -d`
-4. Start server: `node server.js > /tmp/demo-server.log 2>&1 &`
-5. (Optional) Start Funnel: `tailscale funnel 5000`
-6. Verify: `curl https://thor.tailc6067a.ts.net/health`
-7. Open UI: `http://localhost:5000`
+1. Deploy payment service: `./deploy-payments.sh v1.0`
+2. Deploy buggy Threadly: `./deploy.sh v1.1`
+3. Verify bug: `curl -s -o /dev/null -w "%{http_code}" http://localhost:8180/products/7` → 500
+4. Verify payments health: `curl -s http://localhost:8181/actuator/health`
+5. Start monitoring: `cd monitoring && docker compose up -d`
+6. Start server: `node server.js > /tmp/demo-server.log 2>&1 &`
+7. (Optional) Start Funnel: `tailscale funnel 5000`
+8. Verify: `curl https://thor.tailc6067a.ts.net/health`
+9. Open UI: `http://localhost:5000`
 
 ### During demo
 
@@ -271,12 +298,13 @@ The simulate endpoint fills in realistic default alarm values.
 
 1. Stop server: `kill $(lsof -ti:5000)`
 2. Stop Threadly: `kill $(lsof -ti:8180)`
-3. Stop Funnel: `tailscale funnel --remove 5000`
-4. Reset to buggy version: `./deploy.sh v1.1`
+3. Stop payments: `kill $(lsof -ti:8181)`
+4. Stop Funnel: `tailscale funnel --remove 5000`
+5. Reset to buggy version: `./deploy.sh v1.1` (and `./deploy-payments.sh v1.0`)
 
 ## Git
 
-This directory is its own git repo (`/home/duane/projects/agentic-sre-demo/`). The demo app lives in a sibling repo at `/home/duane/projects/threadly/`. Commit to each repo independently.
+This directory is its own git repo (`/home/duane/projects/agentic-sre-demo/`). The demo apps live in sibling repos at `/home/duane/projects/threadly/` and `/home/duane/projects/threadly-payments/`. Commit to each repo independently.
 
 ## Logs
 
@@ -284,6 +312,8 @@ This directory is its own git repo (`/home/duane/projects/agentic-sre-demo/`). T
 |-----|----------|
 | Threadly | `/tmp/threadly.log` |
 | Threadly stdout | `/tmp/threadly-stdout.log` |
+| Payments | `/tmp/payments.log` |
+| Payments stdout | `/tmp/payments-stdout.log` |
 | Demo server | `/tmp/demo-server.log` |
 | Claude SRE sessions | `/tmp/claude-sre.log` |
 

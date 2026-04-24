@@ -21,6 +21,7 @@ services:
       - ./fluent-bit/parsers.conf:/fluent-bit/etc/parsers.conf:ro
       - ./fluent-bit/webhook.lua:/fluent-bit/etc/webhook.lua:ro
       - ${APP_LOG:-/tmp/threadly.log}:/var/log/threadly.log:ro
+      - ${PAYMENTS_LOG:-/tmp/payments.log}:/var/log/payments.log:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
     environment:
