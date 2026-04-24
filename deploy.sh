@@ -16,10 +16,12 @@ if [[ "$BUILDS_DIR" != /* ]]; then
     BUILDS_DIR="$(cd "$SCRIPT_DIR/$BUILDS_DIR" && pwd)"
 fi
 ACTIVE_DIR="$BUILDS_DIR/active"
-JAR_NAME="spring-petclinic-4.0.0-SNAPSHOT.jar"
+JAR_NAME="${APP_JAR_NAME:-threadly.jar}"
 APP_PORT="${APP_PORT:-8180}"
-LOG_FILE="${PETCLINIC_LOG:-/tmp/petclinic.log}"
-STDOUT_LOG="${PETCLINIC_STDOUT_LOG:-/tmp/petclinic-stdout.log}"
+LOG_FILE="${APP_LOG:-/tmp/threadly.log}"
+STDOUT_LOG="${APP_STDOUT_LOG:-/tmp/threadly-stdout.log}"
+APP_NAME="${APP_NAME:-Threadly}"
+APP_PROFILES="${APP_PROFILES:-}"
 
 usage() {
     echo "Usage: $0 <version>"
@@ -41,7 +43,7 @@ if [ ! -f "$SOURCE_JAR" ]; then
     exit 1
 fi
 
-echo "=== Deploying PetClinic $VERSION ==="
+echo "=== Deploying $APP_NAME $VERSION ==="
 
 # Kill existing process
 PID=$(lsof -ti:$APP_PORT 2>/dev/null || true)
@@ -49,7 +51,6 @@ if [ -n "$PID" ]; then
     echo "Stopping current instance (PID $PID)..."
     kill "$PID" 2>/dev/null || true
     sleep 2
-    # Force kill if still alive
     if kill -0 "$PID" 2>/dev/null; then
         kill -9 "$PID" 2>/dev/null || true
         sleep 1
@@ -57,15 +58,25 @@ if [ -n "$PID" ]; then
 fi
 
 # Copy JAR
+mkdir -p "$ACTIVE_DIR"
 echo "Copying $VERSION JAR to active..."
-cp "$SOURCE_JAR" "$ACTIVE_DIR/spring-petclinic.jar"
+cp "$SOURCE_JAR" "$ACTIVE_DIR/$JAR_NAME"
 echo "$VERSION" > "$ACTIVE_DIR/version.txt"
 
+# Truncate log so Fluent Bit only sees fresh lines from this version
+: > "$LOG_FILE"
+
 # Start
-echo "Starting PetClinic $VERSION..."
-java -jar "$ACTIVE_DIR/spring-petclinic.jar" \
+echo "Starting $APP_NAME $VERSION..."
+PROFILE_ARG=""
+if [ -n "$APP_PROFILES" ]; then
+    PROFILE_ARG="--spring.profiles.active=$APP_PROFILES"
+fi
+
+java -jar "$ACTIVE_DIR/$JAR_NAME" \
     --server.port=$APP_PORT \
     --logging.file.name="$LOG_FILE" \
+    $PROFILE_ARG \
     > "$STDOUT_LOG" 2>&1 &
 
 NEW_PID=$!
@@ -75,12 +86,12 @@ echo "Started PID $NEW_PID"
 echo "Waiting for health check..."
 for i in $(seq 1 60); do
     if curl -sf http://localhost:$APP_PORT/actuator/health > /dev/null 2>&1; then
-        echo "=== PetClinic $VERSION is UP (took ${i}s) ==="
+        echo "=== $APP_NAME $VERSION is UP (took ${i}s) ==="
         exit 0
     fi
-    # Check process still alive
     if ! kill -0 "$NEW_PID" 2>/dev/null; then
         echo "ERROR: Process died during startup"
+        tail -20 "$STDOUT_LOG" || true
         exit 1
     fi
     sleep 1

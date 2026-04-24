@@ -15,7 +15,10 @@ if (fs.existsSync(envPath)) {
     const eq = trimmed.indexOf('=');
     if (eq < 0) continue;
     const key = trimmed.slice(0, eq).trim();
-    const val = trimmed.slice(eq + 1).trim();
+    let val = trimmed.slice(eq + 1).trim();
+    if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+      val = val.slice(1, -1);
+    }
     if (!(key in process.env)) process.env[key] = val;
   }
 }
@@ -23,14 +26,15 @@ if (fs.existsSync(envPath)) {
 const PORT = parseInt(process.env.PORT || '5000');
 const COOLDOWN = parseInt(process.env.COOLDOWN || '60');
 const BUILDS_DIR = path.resolve(__dirname, process.env.BUILDS_DIR || '../builds');
-const PETCLINIC_DIR = path.resolve(__dirname, process.env.PETCLINIC_DIR || '../spring-petclinic');
+const APP_DIR = path.resolve(__dirname, process.env.APP_DIR || '../threadly');
+const APP_NAME = process.env.APP_NAME || 'Threadly';
 const ANALYSIS_PHASE_CONTEXT = path.join(__dirname, 'CLAUDE_SRE_ANALYSIS_PHASE.md');
 const REMEDIATION_PHASE_CONTEXT = path.join(__dirname, 'CLAUDE_SRE_REMEDIATION_PHASE.md');
 const LOG_FILE = process.env.CLAUDE_LOG || '/tmp/claude-sre.log';
 const APP_PORT = process.env.APP_PORT || '8180';
-const PETCLINIC_LOG = process.env.PETCLINIC_LOG || '/tmp/petclinic.log';
+const APP_LOG = process.env.APP_LOG || '/tmp/threadly.log';
 const DEMO_HOST = process.env.DEMO_HOST || 'thor';
-const DEMO_TITLE = process.env.DEMO_TITLE || 'DX O2 Closed-Loop Remediation';
+const DEMO_TITLE = process.env.DEMO_TITLE || 'Threadly - Closed-Loop Remediation';
 
 let state = 'idle'; // idle | analyzing | awaiting_choice | executing
 let sseClients = [];
@@ -61,10 +65,11 @@ function setState(newState) {
 function renderPrompt(filePath) {
   let text = fs.readFileSync(filePath, 'utf8');
   const vars = {
-    PETCLINIC_DIR,
+    APP_DIR,
+    APP_NAME,
     BUILDS_DIR,
     APP_PORT,
-    PETCLINIC_LOG,
+    APP_LOG,
     DEPLOY_SCRIPT: path.join(__dirname, 'deploy.sh'),
     CLOSED_LOOP_DIR: __dirname,
   };
@@ -88,7 +93,7 @@ function dispatchClaude(prompt, phase, contextFile) {
     const args = [
       '-p',
       '--append-system-prompt-file', tmpFile,
-      '--add-dir', PETCLINIC_DIR,
+      '--add-dir', APP_DIR,
       '--output-format', 'stream-json',
       '--verbose',
     ];
@@ -214,7 +219,7 @@ Output ONLY valid JSON matching this schema — no markdown fences, no extra tex
   "file": "string - source file name",
   "line": "number - line number",
   "current_version": "string - currently deployed version",
-  "log_excerpt": "string - actual log ERROR block from /tmp/petclinic.log",
+  "log_excerpt": "string - actual log ERROR block from the app log",
   "user_impact": "string - what end users experience",
   "code_snippet": "string - the buggy code with surrounding lines",
   "options": [
@@ -400,14 +405,14 @@ const server = http.createServer(async (req, res) => {
 
     if (url.pathname === '/simulate') {
       const triggerInfo = {
-        alarm_name: payload.alarm_name || 'PetClinic Log Error Rate',
+        alarm_name: payload.alarm_name || 'Threadly Log Error Rate',
         severity: payload.severity || 'Danger',
         status: payload.status || 'OPEN',
         host: payload.host || DEMO_HOST,
-        agent: payload.agent || 'apmia-petclinic|PetClinic|Spring Boot Agent',
-        component: payload.component || 'OwnerController',
-        message: payload.message || payload.error || 'ArithmeticException: / by zero in OwnerController.showOwner',
-        alert_external_id: payload.alert_external_id || 'SuperDomain:PetClinic:Log Error Rate',
+        agent: payload.agent || 'apmia-threadly|Threadly|Spring Boot Agent',
+        component: payload.component || 'ProductController',
+        message: payload.message || payload.error || 'ArithmeticException: / by zero in DiscountCalculator.percentOff',
+        alert_external_id: payload.alert_external_id || 'SuperDomain:Threadly:Log Error Rate',
         metric_name: payload.metric_name || 'Log Events|ERROR:Rate',
         metric_value: payload.metric_value || '42',
         caution_threshold: payload.caution_threshold || '5',

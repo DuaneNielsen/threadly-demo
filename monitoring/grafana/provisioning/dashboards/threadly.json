@@ -1,7 +1,7 @@
 {
-  "uid": "petclinic",
-  "title": "PetClinic Logs",
-  "tags": ["petclinic", "demo"],
+  "uid": "threadly",
+  "title": "Threadly Logs",
+  "tags": ["threadly", "demo"],
   "timezone": "browser",
   "refresh": "5s",
   "time": {
@@ -17,7 +17,7 @@
       "targets": [
         {
           "datasource": { "type": "loki", "uid": "" },
-          "expr": "sum(count_over_time({job=\"petclinic\", level=\"ERROR\"} [$__range]))",
+          "expr": "sum(count_over_time({job=\"threadly\", level=\"ERROR\"} [$__range]))",
           "refId": "A"
         }
       ],
@@ -49,7 +49,7 @@
       "targets": [
         {
           "datasource": { "type": "loki", "uid": "" },
-          "expr": "sum(count_over_time({job=\"petclinic\", level=\"ERROR\"} [1m]))",
+          "expr": "sum(count_over_time({job=\"threadly\", level=\"ERROR\"} [1m]))",
           "legendFormat": "errors/min",
           "refId": "A"
         }
@@ -76,7 +76,7 @@
       "targets": [
         {
           "datasource": { "type": "loki", "uid": "" },
-          "expr": "sum by (level) (count_over_time({job=\"petclinic\"} [1m]))",
+          "expr": "sum by (level) (count_over_time({job=\"threadly\"} [1m]))",
           "legendFormat": "{{level}}",
           "refId": "A"
         }
@@ -106,7 +106,7 @@
       "targets": [
         {
           "datasource": { "type": "loki", "uid": "" },
-          "expr": "{job=\"petclinic\"}",
+          "expr": "{job=\"threadly\"}",
           "refId": "A"
         }
       ],
@@ -129,7 +129,7 @@
       "targets": [
         {
           "datasource": { "type": "loki", "uid": "" },
-          "expr": "{job=\"petclinic\", level=\"ERROR\"}",
+          "expr": "{job=\"threadly\", level=\"ERROR\"}",
           "refId": "A"
         }
       ],

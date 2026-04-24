@@ -20,7 +20,7 @@ services:
       - ./fluent-bit/fluent-bit.conf:/fluent-bit/etc/fluent-bit.conf:ro
       - ./fluent-bit/parsers.conf:/fluent-bit/etc/parsers.conf:ro
       - ./fluent-bit/webhook.lua:/fluent-bit/etc/webhook.lua:ro
-      - ${PETCLINIC_LOG:-/tmp/petclinic.log}:/var/log/petclinic.log:ro
+      - ${APP_LOG:-/tmp/threadly.log}:/var/log/threadly.log:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
     environment:

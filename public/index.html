@@ -3,12 +3,12 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>DX O2 Closed-Loop Remediation</title>
+  <title>Threadly Closed-Loop Remediation</title>
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
   <header>
-    <h1 id="demoTitle">DX O2 <span>Closed-Loop Remediation</span></h1>
+    <h1 id="demoTitle">Threadly <span>Closed-Loop Remediation</span></h1>
     <div class="header-right">
       <div class="version-badge" id="version">--</div>
       <div class="status-badge" id="statusBadge">
@@ -162,7 +162,7 @@ function updateStatus(state, version) {
 
 function simulate() {
   clearUI();
-  const error = 'java.lang.ArithmeticException: / by zero\n\tat org.springframework.samples.petclinic.owner.OwnerController.showOwner(OwnerController.java:182)';
+  const error = 'java.lang.ArithmeticException: / by zero\n\tat com.threadly.discount.DiscountCalculator.percentOff(DiscountCalculator.java:15)';
   fetch('/simulate', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
