@@ -26,7 +26,7 @@ All under `src/main/java/com/threadly/`:
 
 Tables: `products`
 
-Seed data: 7 products across categories `tees`, `graphics`, `long-sleeve`, `promo`. Note that the `promo` category contains a "Signup Freebie" with `original_price = 0.00` — a legitimate edge case for a free-giveaway item.
+Seed data: 7 products across categories `tees`, `graphics`, `long-sleeve`, `promo`. Products are named after web/dev errors (Segfault, Stack Trace, Heisenbug, Race Condition, Deadlock, Kernel Panic, I'm a Teapot). Note that the `promo` category contains "I'm a Teapot" — a free newsletter giveaway with `original_price = 0.00`, which is a legitimate edge case for a free-giveaway item.
 
 ## Versioning
 

@@ -93,7 +93,7 @@ cat ../threadly/builds/active/version.txt
 
 ### The Bug
 
-In `com/threadly/discount/DiscountCalculator.java` `percentOff()` method — the null/zero guards around `BigDecimal.divide(originalPrice, ...)` are removed in v1.1. The seed data includes a "Signup Freebie" promo item with `original_price = 0.00`, so rendering its detail page throws `ArithmeticException: / by zero`.
+In `com/threadly/discount/DiscountCalculator.java` `percentOff()` method — the null/zero guards around `BigDecimal.divide(originalPrice, ...)` are removed in v1.1. The seed data includes an "I'm a Teapot" promo item with `original_price = 0.00`, so rendering its detail page throws `ArithmeticException: / by zero`.
 
 **Trigger:** `curl http://localhost:8180/products/7` → HTTP 500
 
