@@ -5,23 +5,23 @@ AI-driven incident remediation with human-in-the-loop: monitoring detects an err
 ## Architecture
 
 ```
-PetClinic log → Fluent Bit (tail) ──→ Loki (storage) → Grafana (dashboard)
-                     │
-                     └─ ERROR match → webhook POST → server.js (Node) → Analysis Phase Claude
-                                                           ↓
-                                                       Web UI (SSE)
-                                                           ↓
-                                                   User picks action
-                                                           ↓
-                                                   Remediation Phase Claude
+Threadly log → Fluent Bit (tail) ──→ Loki (storage) → Grafana (dashboard)
+                    │
+                    └─ ERROR match → webhook POST → server.js (Node) → Analysis Phase Claude
+                                                          ↓
+                                                      Web UI (SSE)
+                                                          ↓
+                                                  User picks action
+                                                          ↓
+                                                  Remediation Phase Claude
 ```
 
 - **Monitoring:** Fluent Bit + Loki + Grafana (docker-compose in `monitoring/`)
-- **Demo app:** Spring PetClinic (Java/Spring Boot, H2 in-memory DB)
+- **Demo app:** Threadly — three-tier Spring Boot t-shirt store (`/home/duane/projects/threadly/`). Tagline: "threads never drop."
 - **Server:** Node.js HTTP server (no dependencies), configurable via `.env`
 - **Tunnel:** Tailscale Funnel → `https://thor.tailc6067a.ts.net/` (optional, for remote webhooks)
 - **Web UI:** `http://localhost:5000` — dark-themed SPA with SSE streaming
-- **Grafana:** `http://localhost:3001` — PetClinic Logs dashboard (anonymous access)
+- **Grafana:** `http://localhost:3001` — Threadly Logs dashboard (anonymous access)
 - **DX OI tenant (optional):** ITOM-DX-DEMO-DEV (tenant 1857, dxi-na1.saas.broadcom.com)
 
 ## Two-Phase Claude
@@ -57,27 +57,28 @@ When the user clicks an action button, Claude is dispatched again with that opti
 | `tail-sre.py` | Pretty-printer for `/tmp/claude-sre.log` |
 | `dxoi-channel-import.json` | DX OI channel/policy import config |
 
-## Demo App: Spring PetClinic
+## Demo App: Threadly
 
-- **Location:** configured via `PETCLINIC_DIR` in `.env` (default: `../spring-petclinic`)
+- **Location:** configured via `APP_DIR` in `.env` (default: `../threadly`)
 - **Port:** configured via `APP_PORT` in `.env` (default: 8180)
-- **GitHub:** https://github.com/spring-projects/spring-petclinic
-- **Database:** H2 in-memory (resets on restart)
+- **Framework:** Spring Boot 3.4, Thymeleaf, JPA/Hibernate
+- **Database:** PostgreSQL (via `docker-compose.yml` in `APP_DIR`) for the default profile; H2 in-memory for `h2` profile
+- **Java:** 21
 
 ### Versioning
 
-Two git tags in the spring-petclinic repo:
+Two git tags in the threadly repo:
 - **v1.0** — clean, no bugs
-- **v1.1** — contains the divide-by-zero bug in `OwnerController.java`
+- **v1.1** — contains the divide-by-zero bug in `DiscountCalculator.java`
 
 Pre-built JARs:
 ```
-demo/builds/
-├── v1.0/spring-petclinic-4.0.0-SNAPSHOT.jar
-├── v1.1/spring-petclinic-4.0.0-SNAPSHOT.jar
+threadly/builds/
+├── v1.0/threadly.jar
+├── v1.1/threadly.jar
 └── active/
-    ├── spring-petclinic.jar   # copy of whichever version is deployed
-    └── version.txt            # "v1.0" or "v1.1"
+    ├── threadly.jar    # copy of whichever version is deployed
+    └── version.txt     # "v1.0" or "v1.1"
 ```
 
 ### Deploy
@@ -87,16 +88,16 @@ demo/builds/
 ./deploy.sh v1.1
 
 # Check what's deployed
-cat ../builds/active/version.txt
+cat ../threadly/builds/active/version.txt
 ```
 
 ### The Bug
 
-In `OwnerController.java` `showOwner()` method — a "loyalty score" calculation divides `totalVisits / petsWithVisits` without guarding against zero. Most owners have pets with no visits, so viewing any owner detail page throws `ArithmeticException: / by zero`.
+In `com/threadly/discount/DiscountCalculator.java` `percentOff()` method — the null/zero guards around `BigDecimal.divide(originalPrice, ...)` are removed in v1.1. The seed data includes a "Signup Freebie" promo item with `original_price = 0.00`, so rendering its detail page throws `ArithmeticException: / by zero`.
 
-**Trigger:** `curl http://localhost:8180/owners/1` → HTTP 500
+**Trigger:** `curl http://localhost:8180/products/7` → HTTP 500
 
-**Fix:** Add `petsWithVisits > 0 ?` ternary guard before the division.
+**Fix:** Restore the `originalPrice == null` and `originalPrice.signum() == 0` guards before the division.
 
 ## Server (server.js)
 
@@ -109,7 +110,7 @@ npm start
 
 ### Configuration
 
-All paths and ports are configurable via `.env` (see `.env.example`). Environment variables override `.env` values. Prompt files (`CLAUDE_SRE_ANALYSIS_PHASE.md`, `CLAUDE_SRE_REMEDIATION_PHASE.md`) use `{{PLACEHOLDER}}` tokens that are resolved at runtime by server.js.
+All paths and ports are configurable via `.env` (see `.env.example`). Environment variables override `.env` values. Prompt files (`CLAUDE_SRE_ANALYSIS_PHASE.md`, `CLAUDE_SRE_REMEDIATION_PHASE.md`) use `{{PLACEHOLDER}}` tokens that are resolved at runtime by server.js. Placeholders: `{{APP_DIR}}`, `{{APP_NAME}}`, `{{APP_PORT}}`, `{{APP_LOG}}`, `{{BUILDS_DIR}}`, `{{DEPLOY_SCRIPT}}`, `{{CLOSED_LOOP_DIR}}`.
 
 ### Endpoints
 
@@ -119,7 +120,7 @@ All paths and ports are configurable via `.env` (see `.env.example`). Environmen
 | `/health` | GET | Health check |
 | `/status` | GET | Current state, version, trigger, diagnosis, options |
 | `/events` | GET | SSE stream for real-time updates |
-| `/webhook` | POST | DX OI alarm webhook receiver |
+| `/webhook` | POST | DX OI / Fluent Bit alarm webhook receiver |
 | `/simulate` | POST | Trigger with simulated alarm payload |
 | `/execute` | POST | Execute a remediation option (`{ optionId: 1 }`) |
 | `/reset` | POST | Reset state to idle |
@@ -165,7 +166,7 @@ docker compose logs -f     # follow logs
 
 | Service | Image | Port | Purpose |
 |---------|-------|------|---------|
-| Fluent Bit | `fluent/fluent-bit:4.0` | - | Tails petclinic.log, ships to Loki, webhooks ERRORs |
+| Fluent Bit | `fluent/fluent-bit:4.0` | - | Tails `threadly.log`, ships to Loki, webhooks ERRORs |
 | Loki | `grafana/loki:3.4.2` | 3100 | Log storage/query |
 | Grafana | `grafana/grafana:11.6.0` | 3001 (configurable via `GRAFANA_PORT`) | Dashboard UI (anonymous admin access) |
 
@@ -179,7 +180,7 @@ The webhook fires within ~1-2 seconds of an ERROR appearing in the log.
 
 ### Grafana Dashboard
 
-Pre-provisioned at `http://localhost:3001/d/petclinic/petclinic-logs`:
+Pre-provisioned at `http://localhost:3001/d/threadly/threadly-logs`:
 - Total Errors (stat panel)
 - Error Rate (time series)
 - Log Volume by Level (bar chart)
@@ -191,7 +192,7 @@ Pre-provisioned at `http://localhost:3001/d/petclinic/petclinic-logs`:
 Fluent Bit config: `monitoring/fluent-bit/fluent-bit.conf`
 Webhook payload transform: `monitoring/fluent-bit/webhook.lua`
 Grafana datasource: `monitoring/grafana/provisioning/datasources/loki.yml`
-Dashboard JSON: `monitoring/grafana/provisioning/dashboards/petclinic.json`
+Dashboard JSON: `monitoring/grafana/provisioning/dashboards/threadly.json`
 
 ## Tailscale Funnel
 
@@ -237,17 +238,17 @@ curl https://thor.tailc6067a.ts.net/health
 ### Setup (before demo)
 
 1. Deploy the buggy version: `./deploy.sh v1.1`
-2. Verify bug: `curl -s -o /dev/null -w "%{http_code}" http://localhost:8180/owners/1` → 500
+2. Verify bug: `curl -s -o /dev/null -w "%{http_code}" http://localhost:8180/products/7` → 500
 3. Start monitoring: `cd monitoring && docker compose up -d`
 4. Start server: `node server.js > /tmp/demo-server.log 2>&1 &`
 5. (Optional) Start Funnel: `tailscale funnel 5000`
-5. Verify: `curl https://thor.tailc6067a.ts.net/health`
-6. Open UI: `http://localhost:5000`
+6. Verify: `curl https://thor.tailc6067a.ts.net/health`
+7. Open UI: `http://localhost:5000`
 
 ### During demo
 
 1. Show the UI — status is idle, version is v1.1
-2. Click "Trigger Simulated Alarm" (or wait for real DX OI alarm)
+2. Click "Trigger Simulated Alarm" (or wait for real DX OI alarm, or `curl http://localhost:8180/products/7` for a real error)
 3. Watch the analysis phase stream in the terminal panel
 4. Trigger card shows the alarm details
 5. RCA panel appears with diagnosis (toggle Formatted / Source JSON)
@@ -269,33 +270,20 @@ The simulate endpoint fills in realistic default alarm values.
 ### Teardown (after demo)
 
 1. Stop server: `kill $(lsof -ti:5000)`
-2. Stop PetClinic: `kill $(lsof -ti:8180)`
+2. Stop Threadly: `kill $(lsof -ti:8180)`
 3. Stop Funnel: `tailscale funnel --remove 5000`
 4. Reset to buggy version: `./deploy.sh v1.1`
 
 ## Git
 
-The repo root is `/home/duane/dx-do/` (not this directory). To commit from the `closed-loop/` directory:
-
-```bash
-cd /home/duane/dx-do
-git add demo/closed-loop/
-git commit -m "your message"
-```
-
-Or use `git -C /home/duane/dx-do` from anywhere:
-
-```bash
-git -C /home/duane/dx-do add demo/closed-loop/
-git -C /home/duane/dx-do commit -m "your message"
-```
+This directory is its own git repo (`/home/duane/projects/agentic-sre-demo/`). The demo app lives in a sibling repo at `/home/duane/projects/threadly/`. Commit to each repo independently.
 
 ## Logs
 
 | Log | Location |
 |-----|----------|
-| PetClinic | `/tmp/petclinic.log` |
-| PetClinic stdout | `/tmp/petclinic-stdout.log` |
+| Threadly | `/tmp/threadly.log` |
+| Threadly stdout | `/tmp/threadly-stdout.log` |
 | Demo server | `/tmp/demo-server.log` |
 | Claude SRE sessions | `/tmp/claude-sre.log` |
 
