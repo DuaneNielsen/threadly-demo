@@ -126,11 +126,26 @@ body {
 
 .card-img {
     aspect-ratio: 4 / 5;
-    background: #eee;
+    background: #f3f2ec;
     position: relative;
     display: flex;
     align-items: flex-end;
     padding: 16px;
+    overflow: hidden;
+}
+
+.card-img img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    padding: 14%;
+    transition: transform 0.3s;
+}
+
+.card:hover .card-img img {
+    transform: scale(1.03);
 }
 
 .card-img-label {
@@ -206,6 +221,17 @@ body {
     display: flex;
     align-items: flex-end;
     padding: 20px;
+    background: #f3f2ec;
+    overflow: hidden;
+}
+
+.detail-img img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    padding: 10%;
 }
 
 .detail-info h1 {

@@ -13,7 +13,8 @@
     <section class="grid">
         <article class="card" th:each="p : ${products}">
             <a th:href="@{/products/{id}(id=${p.id})}" class="card-link">
-                <div class="card-img" th:style="'background-color:' + ${p.color}">
+                <div class="card-img">
+                    <img th:src="@{${p.imageUrl}}" th:alt="${p.name}"/>
                     <span class="card-img-label" th:text="${p.category}">tees</span>
                 </div>
                 <div class="card-body">

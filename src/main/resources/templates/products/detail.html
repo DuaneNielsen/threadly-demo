@@ -6,7 +6,8 @@
 
 <main class="wrap detail">
     <div class="detail-grid">
-        <div class="detail-img" th:style="'background-color:' + ${product.color}">
+        <div class="detail-img">
+            <img th:src="@{${product.imageUrl}}" th:alt="${product.name}"/>
             <span class="card-img-label" th:text="${product.category}">tees</span>
         </div>
         <div class="detail-info">
