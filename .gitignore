@@ -2,3 +2,4 @@
 node_modules/
 *.log
 snow-tickets/
+.claude/settings.local.json

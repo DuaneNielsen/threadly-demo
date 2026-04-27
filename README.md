@@ -1,6 +1,6 @@
 # Closed-Loop Remediation Demo
 
-AI-driven incident remediation with human-in-the-loop: DX Operational Intelligence (or Fluent Bit) detects an error, fires a webhook, Claude Code diagnoses the issue and presents remediation options, the user picks an action, and Claude executes it.
+AI-driven incident remediation with human-in-the-loop: a monitoring agent (Fluent Bit, or any tool that can POST a JSON webhook) detects an error, fires a webhook, Claude Code diagnoses the issue and presents remediation options, the user picks an action, and Claude executes it.
 
 Demo apps: **Threadly** — a Spring Boot t-shirt store with cart + checkout, and **threadly-payments** — a Stripe-style fake payment service it calls. A divide-by-zero bug is planted in Threadly's discount calculator, and the payment service has a card number (`4000 0000 0000 0119`) that triggers 500s for future bug planting. Tagline: "threads never drop."
 
@@ -9,9 +9,10 @@ Demo apps: **Threadly** — a Spring Boot t-shirt store with cart + checkout, an
 - **Node.js** >= 18
 - **Claude Code** CLI (`claude`)
 - **Java** 21 (for Threadly)
-- **Docker** (for the Fluent Bit + Loki + Grafana stack, and optional Postgres)
+- **Docker** (for the Fluent Bit + Loki + Grafana monitoring stack)
+- **sqlite3** CLI — optional, for inspecting the demo DBs
 - **GitHub CLI** (`gh`) — optional, for code-fix PR creation
-- **Tailscale** — optional, for exposing the webhook to DX OI
+- **A tunnel/reverse-proxy** (Tailscale Funnel, ngrok, Caddy, etc.) — optional, only if you want to receive webhooks from a remote source
 
 ## Quick Start
 
@@ -38,7 +39,7 @@ All settings are in `.env` (copied from `.env.example` by setup). Environment va
 | `APP_JAR_NAME` | `threadly.jar` | JAR filename in `BUILDS_DIR/vN.N/` |
 | `APP_LOG` | `/tmp/threadly.log` | App log file (tailed by Fluent Bit) |
 | `APP_STDOUT_LOG` | `/tmp/threadly-stdout.log` | App stdout log |
-| `APP_PROFILES` | `h2` | Spring profile (`h2` for embedded, empty for Postgres) |
+| `THREADLY_DB` | `/tmp/threadly.db` | SQLite DB file for Threadly (persisted across deploys) |
 | `PAYMENTS_DIR` | `../threadly-payments` | Path to the payment service repo |
 | `PAYMENTS_BUILDS_DIR` | `../threadly-payments/builds` | Path to versioned JAR builds for payments |
 | `PAYMENTS_NAME` | `ThreadlyPayments` | Display name for the payment service |
@@ -47,6 +48,7 @@ All settings are in `.env` (copied from `.env.example` by setup). Environment va
 | `PAYMENTS_LOG` | `/tmp/payments.log` | Payment service log (tailed by Fluent Bit) |
 | `PAYMENTS_STDOUT_LOG` | `/tmp/payments-stdout.log` | Payment service stdout |
 | `PAYMENTS_URL` | `http://localhost:8181` | URL passed to Threadly for payment calls |
+| `PAYMENTS_DB` | `/tmp/payments.db` | SQLite DB file for payments (persisted across deploys) |
 | `CLAUDE_LOG` | `/tmp/claude-sre.log` | Claude session log |
 | `DEMO_HOST` | `thor` | Hostname in simulated alarms |
 | `DEMO_TITLE` | `Threadly Closed-Loop Remediation` | Web UI title |
@@ -68,7 +70,6 @@ projects/
 ├── threadly/                      # t-shirt store (cart, checkout, orders)
 │   ├── src/
 │   ├── pom.xml
-│   ├── docker-compose.yml         # Postgres (optional)
 │   └── builds/
 │       ├── v1.0/threadly.jar      # clean
 │       ├── v1.1/threadly.jar      # planted bug
@@ -95,7 +96,7 @@ projects/
 
 ### Run
 
-1. Click **Trigger Simulated Alarm** (or wait for a real Fluent Bit / DX OI webhook)
+1. Click **Trigger Simulated Alarm** (or wait for a real Fluent Bit webhook from an actual error)
 2. Watch the analysis phase stream in the terminal panel
 3. Review the root cause analysis and three remediation options
 4. Click an action to execute it
@@ -107,17 +108,13 @@ projects/
 curl -X POST http://localhost:5000/simulate
 ```
 
-## DX OI Integration
+## Public Webhook Access (optional)
 
-To receive real alarms from DX Operational Intelligence:
-
-1. Expose the server: `tailscale funnel <PORT>`
-2. Update the webhook URL in `dxoi-channel-import.json` to your Tailscale hostname
-3. Import the channel config: `dx-do channel import importFile=dxoi-channel-import.json`
+To receive alarms from a remote source (a SaaS monitor, an external Fluent Bit, etc.) the `/webhook` endpoint needs to be reachable from the internet. Any tunnel or reverse-proxy works — Tailscale Funnel, ngrok, or Caddy with a real domain. The webhook expects a JSON body; see the `/simulate` endpoint for the canonical payload shape.
 
 ## How It Works
 
-1. **Webhook/Simulate** — an alarm arrives (real or simulated). Fluent Bit tails `APP_LOG`, filters ERROR lines, and POSTs a DX-OI-style payload to `/webhook`.
+1. **Webhook/Simulate** — an alarm arrives (real or simulated). Fluent Bit tails `APP_LOG`, filters ERROR lines, and POSTs a JSON payload to `/webhook`.
 2. **Analysis Phase** — Claude Code reads logs and source code, outputs a structured diagnosis with 3 remediation options (rollback, code fix, ServiceNow ticket)
 3. **User Choice** — the operator picks an option from the web UI
 4. **Remediation Phase** — Claude Code executes the chosen action (deploys, creates PR, or files ticket)

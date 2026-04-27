@@ -8,11 +8,18 @@ AI-driven incident remediation with human-in-the-loop: monitoring detects an err
  +---------+          +------------+     HTTP     +---------------------+
  | Browser | -------> |  Threadly  | -----------> |  threadly-payments  |
  +---------+  :8180   |  (store)   |    :8181     |   (fake PSP)        |
-                      +------------+              +---------------------+
-                            |                             |
+                      +-----+------+              +----------+----------+
+                            |                                |
+                            v                                v
+                      +-----------+                   +-----------+
+                      |  SQLite   |                   |  SQLite   |
+                      | threadly  |                   | payments  |
+                      |    .db    |                   |    .db    |
+                      +-----------+                   +-----------+
+                            |                                |
                      /tmp/threadly.log             /tmp/payments.log
-                            |                             |
-                            +------ Fluent Bit -----------+
+                            |                                |
+                            +------ Fluent Bit --------------+
                                        |
                                     Loki / Grafana (:3001)
                                        |
@@ -21,13 +28,12 @@ AI-driven incident remediation with human-in-the-loop: monitoring detects an err
 
 - **Monitoring:** Fluent Bit + Loki + Grafana (docker-compose in `monitoring/`)
 - **Demo apps:**
-  - **Threadly** — Spring Boot t-shirt store with cart/checkout/orders (`/home/duane/projects/threadly/`, port 8180). Tagline: "threads never drop."
-  - **threadly-payments** — Stripe-style fake PSP (`/home/duane/projects/threadly-payments/`, port 8181) called by Threadly's `PaymentClient`.
+  - **Threadly** — Spring Boot t-shirt store with cart/checkout/orders (sibling repo, port 8180). Tagline: "threads never drop."
+  - **threadly-payments** — Stripe-style fake PSP (sibling repo, port 8181) called by Threadly's `PaymentClient`.
 - **Server:** Node.js HTTP server (no dependencies), configurable via `.env`
-- **Tunnel:** Tailscale Funnel → `https://thor.tailc6067a.ts.net/` (optional, for remote webhooks)
+- **Tunnel (optional):** any reverse-proxy or tunnel works (Tailscale Funnel, ngrok, Caddy, etc.) for exposing the webhook endpoint to remote alarm sources
 - **Web UI:** `http://localhost:5000` — dark-themed SPA with SSE streaming
 - **Grafana:** `http://localhost:3001` — Threadly + Payments logs dashboard (anonymous access)
-- **DX OI tenant (optional):** ITOM-DX-DEMO-DEV (tenant 1857, dxi-na1.saas.broadcom.com)
 
 ## Two-Phase Claude
 
@@ -57,11 +63,7 @@ When the user clicks an action button, Claude is dispatched again with that opti
 | `setup.sh` | Prerequisites checker and `.env` creator |
 | `package.json` | Project metadata and npm scripts |
 | `README.md` | Installation and usage guide |
-| `CLAUDE_SRE.md` | Legacy v1 system prompt (kept for reference) |
-| `webhook-receiver.py` | Legacy v1 Python webhook receiver (kept for reference) |
-| `watch-and-fix.sh` | Alternate log-watcher mode (tails log directly, no webhook) |
 | `tail-sre.py` | Pretty-printer for `/tmp/claude-sre.log` |
-| `dxoi-channel-import.json` | DX OI channel/policy import config |
 
 ## Demo Apps
 
@@ -70,7 +72,7 @@ When the user clicks an action button, Claude is dispatched again with that opti
 - **Location:** `APP_DIR` (default `../threadly`)
 - **Port:** `APP_PORT` (default 8180)
 - **Framework:** Spring Boot 3.4, Thymeleaf, JPA/Hibernate
-- **Database:** PostgreSQL (via `docker-compose.yml` in `APP_DIR`) for the default profile; H2 in-memory for `h2` profile
+- **Database:** SQLite file at `$THREADLY_DB` (default `/tmp/threadly.db`). Persists across restarts. H2 in-memory is used for tests only.
 - **Java:** 21
 - Calls threadly-payments via `PaymentClient` (URL from `payments.url`; `deploy.sh` passes `--payments.url=$PAYMENTS_URL`)
 
@@ -78,7 +80,8 @@ When the user clicks an action button, Claude is dispatched again with that opti
 
 - **Location:** `PAYMENTS_DIR` (default `../threadly-payments`)
 - **Port:** `PAYMENTS_PORT` (default 8181)
-- **Framework:** Spring Boot 3.4, JPA/Hibernate (H2 in-memory)
+- **Framework:** Spring Boot 3.4, JPA/Hibernate
+- **Database:** SQLite file at `$PAYMENTS_DB` (default `/tmp/payments.db`). H2 in-memory for tests only.
 - **Java:** 21
 - **API:** `POST /v1/charges`, `GET /v1/charges/{id}`, `GET /actuator/health`
 - **Test cards:** `4242...` succeeds, `4000...0002` = card_declined, `4000...9995` = insufficient_funds, `4000...0069` = expired_card, `4000...0119` = 500 (future bug-plant surface)
@@ -219,44 +222,16 @@ Webhook payload transform: `monitoring/fluent-bit/webhook.lua`
 Grafana datasource: `monitoring/grafana/provisioning/datasources/loki.yml`
 Dashboard JSON: `monitoring/grafana/provisioning/dashboards/threadly.json`
 
-## Tailscale Funnel
+## Public Webhook Access (optional)
 
-Exposes the server to the public internet so DX OI can reach it.
+To receive alarms from a remote source (a SaaS monitoring tool, an external Fluent Bit, etc.) the webhook endpoint at `:5000/webhook` needs to be reachable from the internet. Any reverse-proxy or tunnel works:
 
-```bash
-# Start
-tailscale funnel 5000
+- **Tailscale Funnel** — `tailscale funnel 5000`
+- **ngrok** — `ngrok http 5000`
+- **Caddy** with a real domain + Let's Encrypt
+- **Cloud LB** — for cloud-hosted deployments
 
-# Public URL
-https://thor.tailc6067a.ts.net/
-
-# Test
-curl https://thor.tailc6067a.ts.net/health
-```
-
-## DX OI Configuration
-
-### Channel: "Claude SRE"
-
-- **Type:** genericwebhook
-- **URL:** `https://thor.tailc6067a.ts.net/webhook`
-- **Auth:** TOKEN_AUTH (dummy token)
-- **Payload:** alarm_name, severity, status, host, agent, metric_name, metric_value, component_name, message, alert_external_id, alarm_type, danger/caution thresholds
-
-### Policy: "Claude Remediation Policy"
-
-- **Status:** Active (disable when not demoing!)
-- **Filter:** Non-service alarms with severity increase above Unknown
-- **Linked to:** Claude SRE channel
-
-### Manage via dx-do
-
-```bash
-/home/duane/dx-do/dx-do channel list output.format=json
-/home/duane/dx-do/dx-do channel list-policies output.format=json
-/home/duane/dx-do/dx-do channel export exportFile=channels-backup.json
-/home/duane/dx-do/dx-do channel import importFile=dxoi-channel-import.json
-```
+Whatever you pick, your webhook URL is `https://<public-host>/webhook`. The server expects a JSON body with at minimum an alarm payload — see `/simulate` for the canonical shape.
 
 ## Full Demo Runbook
 
@@ -268,14 +243,13 @@ curl https://thor.tailc6067a.ts.net/health
 4. Verify payments health: `curl -s http://localhost:8181/actuator/health`
 5. Start monitoring: `cd monitoring && docker compose up -d`
 6. Start server: `node server.js > /tmp/demo-server.log 2>&1 &`
-7. (Optional) Start Funnel: `tailscale funnel 5000`
-8. Verify: `curl https://thor.tailc6067a.ts.net/health`
-9. Open UI: `http://localhost:5000`
+7. (Optional) Start a tunnel/reverse-proxy if you want remote alarm sources
+8. Open UI: `http://localhost:5000`
 
 ### During demo
 
 1. Show the UI — status is idle, version is v1.1
-2. Click "Trigger Simulated Alarm" (or wait for real DX OI alarm, or `curl http://localhost:8180/products/7` for a real error)
+2. Click "Trigger Simulated Alarm" (or `curl http://localhost:8180/products/7` to fire a real error through the webhook)
 3. Watch the analysis phase stream in the terminal panel
 4. Trigger card shows the alarm details
 5. RCA panel appears with diagnosis (toggle Formatted / Source JSON)
@@ -299,12 +273,13 @@ The simulate endpoint fills in realistic default alarm values.
 1. Stop server: `kill $(lsof -ti:5000)`
 2. Stop Threadly: `kill $(lsof -ti:8180)`
 3. Stop payments: `kill $(lsof -ti:8181)`
-4. Stop Funnel: `tailscale funnel --remove 5000`
+4. (Optional) Stop your tunnel
 5. Reset to buggy version: `./deploy.sh v1.1` (and `./deploy-payments.sh v1.0`)
+6. (Optional) Wipe persisted state: `rm /tmp/threadly.db /tmp/payments.db`
 
 ## Git
 
-This directory is its own git repo (`/home/duane/projects/agentic-sre-demo/`). The demo apps live in sibling repos at `/home/duane/projects/threadly/` and `/home/duane/projects/threadly-payments/`. Commit to each repo independently.
+This directory is its own git repo. The demo apps live in sibling repos `threadly/` and `threadly-payments/`. Commit to each repo independently.
 
 ## Logs
 
@@ -316,6 +291,18 @@ This directory is its own git repo (`/home/duane/projects/agentic-sre-demo/`). T
 | Payments stdout | `/tmp/payments-stdout.log` |
 | Demo server | `/tmp/demo-server.log` |
 | Claude SRE sessions | `/tmp/claude-sre.log` |
+
+## Databases
+
+Both services use file-backed SQLite. Inspect with the `sqlite3` CLI:
+
+```bash
+sqlite3 /tmp/threadly.db '.tables'
+sqlite3 /tmp/threadly.db 'SELECT id, email, status, total FROM orders ORDER BY id DESC LIMIT 5;'
+sqlite3 /tmp/payments.db 'SELECT id, status, amount FROM charges ORDER BY created DESC LIMIT 5;'
+```
+
+DB paths are configurable via `THREADLY_DB` and `PAYMENTS_DB` in `.env`. State persists across `./deploy.sh` runs (deploys don't touch the DB file). Delete the file for a clean slate.
 
 ### Pretty-print Claude log
 

@@ -34,7 +34,7 @@ def render(line: str):
     if not line:
         return
 
-    # Plain banner lines from webhook-receiver.py
+    # Plain banner lines from server.js dispatch logs
     if not line.startswith("{"):
         if line.startswith("==="):
             return  # skip separator bars, banner handles it
