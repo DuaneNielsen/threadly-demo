@@ -1,0 +1,19 @@
+[Unit]
+Description=Threadly Storefront (Spring Boot, port 8180)
+Documentation=https://github.com/DuaneNielsen/threadly-demo
+After=network-online.target threadly-payments.service
+Wants=network-online.target
+Requires=threadly-payments.service
+
+[Service]
+Type=simple
+User=duane_nielsen_rocks_gmail_com
+Group=duane_nielsen_rocks_gmail_com
+WorkingDirectory=/opt/threadly-demo/orchestrator
+ExecStart=/usr/bin/java -jar /opt/threadly-demo/threadly/builds/active/threadly.jar --server.port=8180 --logging.file.name=/tmp/threadly.log --payments.url=http://localhost:8181
+Restart=on-failure
+RestartSec=10
+TimeoutStartSec=120
+
+[Install]
+WantedBy=multi-user.target

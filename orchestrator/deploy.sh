@@ -46,19 +46,16 @@ fi
 
 echo "=== Deploying $APP_NAME $VERSION ==="
 
-# Kill existing process
-PID=$(lsof -ti:$APP_PORT 2>/dev/null || true)
-if [ -n "$PID" ]; then
-    echo "Stopping current instance (PID $PID)..."
-    kill "$PID" 2>/dev/null || true
-    sleep 2
-    if kill -0 "$PID" 2>/dev/null; then
-        kill -9 "$PID" 2>/dev/null || true
-        sleep 1
-    fi
+# Detect deployment mode: if a matching systemd unit is loaded, hand off to it;
+# otherwise fall back to the local-dev kill+fork pattern.
+SYSTEMD_UNIT="${SYSTEMD_UNIT:-threadly}"
+USE_SYSTEMD=0
+if command -v systemctl >/dev/null 2>&1 && \
+   systemctl cat "$SYSTEMD_UNIT.service" >/dev/null 2>&1; then
+    USE_SYSTEMD=1
 fi
 
-# Copy JAR
+# Stage the JAR in active/ — both modes need this first.
 mkdir -p "$ACTIVE_DIR"
 echo "Copying $VERSION JAR to active..."
 cp "$SOURCE_JAR" "$ACTIVE_DIR/$JAR_NAME"
@@ -67,31 +64,47 @@ echo "$VERSION" > "$ACTIVE_DIR/version.txt"
 # Truncate log so Fluent Bit only sees fresh lines from this version
 : > "$LOG_FILE"
 
-# Start
-echo "Starting $APP_NAME $VERSION..."
-PROFILE_ARG=""
-if [ -n "$APP_PROFILES" ]; then
-    PROFILE_ARG="--spring.profiles.active=$APP_PROFILES"
+if [ "$USE_SYSTEMD" = "1" ]; then
+    echo "systemd unit detected — restarting $SYSTEMD_UNIT.service..."
+    sudo systemctl restart "$SYSTEMD_UNIT.service"
+else
+    # Local dev path: kill any existing JVM on this port, then fork a fresh one.
+    PID=$(lsof -ti:$APP_PORT 2>/dev/null || true)
+    if [ -n "$PID" ]; then
+        echo "Stopping current instance (PID $PID)..."
+        kill "$PID" 2>/dev/null || true
+        sleep 2
+        if kill -0 "$PID" 2>/dev/null; then
+            kill -9 "$PID" 2>/dev/null || true
+            sleep 1
+        fi
+    fi
+
+    echo "Starting $APP_NAME $VERSION..."
+    PROFILE_ARG=""
+    if [ -n "$APP_PROFILES" ]; then
+        PROFILE_ARG="--spring.profiles.active=$APP_PROFILES"
+    fi
+
+    java -jar "$ACTIVE_DIR/$JAR_NAME" \
+        --server.port=$APP_PORT \
+        --logging.file.name="$LOG_FILE" \
+        --payments.url="$PAYMENTS_URL" \
+        $PROFILE_ARG \
+        > "$STDOUT_LOG" 2>&1 &
+
+    NEW_PID=$!
+    echo "Started PID $NEW_PID"
 fi
 
-java -jar "$ACTIVE_DIR/$JAR_NAME" \
-    --server.port=$APP_PORT \
-    --logging.file.name="$LOG_FILE" \
-    --payments.url="$PAYMENTS_URL" \
-    $PROFILE_ARG \
-    > "$STDOUT_LOG" 2>&1 &
-
-NEW_PID=$!
-echo "Started PID $NEW_PID"
-
-# Wait for health
+# Wait for health (both modes)
 echo "Waiting for health check..."
 for i in $(seq 1 60); do
     if curl -sf http://localhost:$APP_PORT/actuator/health > /dev/null 2>&1; then
         echo "=== $APP_NAME $VERSION is UP (took ${i}s) ==="
         exit 0
     fi
-    if ! kill -0 "$NEW_PID" 2>/dev/null; then
+    if [ "$USE_SYSTEMD" = "0" ] && ! kill -0 "${NEW_PID:-0}" 2>/dev/null; then
         echo "ERROR: Process died during startup"
         tail -20 "$STDOUT_LOG" || true
         exit 1

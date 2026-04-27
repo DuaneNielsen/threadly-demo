@@ -1,0 +1,28 @@
+[Unit]
+Description=oauth2-proxy (Google sign-in gate in front of demo-server)
+Documentation=https://oauth2-proxy.github.io/oauth2-proxy/
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=oauth2-proxy
+Group=oauth2-proxy
+EnvironmentFile=/etc/oauth2-proxy/client-id.env
+EnvironmentFile=/etc/threadly-demo/oauth2-proxy.env
+ExecStart=/usr/local/bin/oauth2-proxy \
+  --provider=google \
+  --http-address=127.0.0.1:4180 \
+  --reverse-proxy=true \
+  --upstream=http://127.0.0.1:5000 \
+  --redirect-url=https://demo.agenticdemo.dev/oauth2/callback \
+  --authenticated-emails-file=/etc/oauth2-proxy/emails.txt \
+  --email-domain=* \
+  --cookie-secure=true \
+  --cookie-samesite=lax \
+  --skip-provider-button=true
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

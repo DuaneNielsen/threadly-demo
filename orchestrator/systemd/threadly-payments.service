@@ -1,0 +1,18 @@
+[Unit]
+Description=Threadly Payments (Spring Boot, port 8181)
+Documentation=https://github.com/DuaneNielsen/threadly-demo
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=duane_nielsen_rocks_gmail_com
+Group=duane_nielsen_rocks_gmail_com
+WorkingDirectory=/opt/threadly-demo/orchestrator
+ExecStart=/usr/bin/java -jar /opt/threadly-demo/threadly-payments/builds/active/threadly-payments.jar --server.port=8181 --logging.file.name=/tmp/payments.log
+Restart=on-failure
+RestartSec=10
+TimeoutStartSec=120
+
+[Install]
+WantedBy=multi-user.target

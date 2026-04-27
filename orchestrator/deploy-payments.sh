@@ -44,15 +44,12 @@ fi
 
 echo "=== Deploying $APP_NAME $VERSION ==="
 
-PID=$(lsof -ti:$PAYMENTS_PORT 2>/dev/null || true)
-if [ -n "$PID" ]; then
-    echo "Stopping current instance (PID $PID)..."
-    kill "$PID" 2>/dev/null || true
-    sleep 2
-    if kill -0 "$PID" 2>/dev/null; then
-        kill -9 "$PID" 2>/dev/null || true
-        sleep 1
-    fi
+# Detect deployment mode (see deploy.sh for the rationale).
+SYSTEMD_UNIT="${PAYMENTS_SYSTEMD_UNIT:-threadly-payments}"
+USE_SYSTEMD=0
+if command -v systemctl >/dev/null 2>&1 && \
+   systemctl cat "$SYSTEMD_UNIT.service" >/dev/null 2>&1; then
+    USE_SYSTEMD=1
 fi
 
 mkdir -p "$ACTIVE_DIR"
@@ -62,14 +59,30 @@ echo "$VERSION" > "$ACTIVE_DIR/version.txt"
 
 : > "$LOG_FILE"
 
-echo "Starting $APP_NAME $VERSION..."
-java -jar "$ACTIVE_DIR/$JAR_NAME" \
-    --server.port=$PAYMENTS_PORT \
-    --logging.file.name="$LOG_FILE" \
-    > "$STDOUT_LOG" 2>&1 &
+if [ "$USE_SYSTEMD" = "1" ]; then
+    echo "systemd unit detected — restarting $SYSTEMD_UNIT.service..."
+    sudo systemctl restart "$SYSTEMD_UNIT.service"
+else
+    PID=$(lsof -ti:$PAYMENTS_PORT 2>/dev/null || true)
+    if [ -n "$PID" ]; then
+        echo "Stopping current instance (PID $PID)..."
+        kill "$PID" 2>/dev/null || true
+        sleep 2
+        if kill -0 "$PID" 2>/dev/null; then
+            kill -9 "$PID" 2>/dev/null || true
+            sleep 1
+        fi
+    fi
 
-NEW_PID=$!
-echo "Started PID $NEW_PID"
+    echo "Starting $APP_NAME $VERSION..."
+    java -jar "$ACTIVE_DIR/$JAR_NAME" \
+        --server.port=$PAYMENTS_PORT \
+        --logging.file.name="$LOG_FILE" \
+        > "$STDOUT_LOG" 2>&1 &
+
+    NEW_PID=$!
+    echo "Started PID $NEW_PID"
+fi
 
 echo "Waiting for health check..."
 for i in $(seq 1 60); do
@@ -77,7 +90,7 @@ for i in $(seq 1 60); do
         echo "=== $APP_NAME $VERSION is UP (took ${i}s) ==="
         exit 0
     fi
-    if ! kill -0 "$NEW_PID" 2>/dev/null; then
+    if [ "$USE_SYSTEMD" = "0" ] && ! kill -0 "${NEW_PID:-0}" 2>/dev/null; then
         echo "ERROR: Process died during startup"
         tail -20 "$STDOUT_LOG" || true
         exit 1

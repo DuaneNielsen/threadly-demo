@@ -1,0 +1,20 @@
+[Unit]
+Description=Threadly closed-loop demo server (Node.js webhook receiver, port 5000)
+Documentation=https://github.com/DuaneNielsen/threadly-demo
+After=network-online.target threadly.service threadly-payments.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=duane_nielsen_rocks_gmail_com
+Group=duane_nielsen_rocks_gmail_com
+WorkingDirectory=/opt/threadly-demo/orchestrator
+EnvironmentFile=/etc/threadly-demo/anthropic.env
+EnvironmentFile=/etc/threadly-demo/webhook.env
+EnvironmentFile=/etc/threadly-demo/gh.env
+ExecStart=/usr/bin/node /opt/threadly-demo/orchestrator/server.js
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

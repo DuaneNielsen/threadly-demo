@@ -20,12 +20,16 @@ services:
       - ./fluent-bit/fluent-bit.conf:/fluent-bit/etc/fluent-bit.conf:ro
       - ./fluent-bit/parsers.conf:/fluent-bit/etc/parsers.conf:ro
       - ./fluent-bit/webhook.lua:/fluent-bit/etc/webhook.lua:ro
-      - ${APP_LOG:-/tmp/threadly.log}:/var/log/threadly.log:ro
-      - ${PAYMENTS_LOG:-/tmp/payments.log}:/var/log/payments.log:ro
+      # Directory bind-mount: tolerates Logback inode replacement on app redeploy
+      # (per-file binds went stale and made fluent-bit hold the old inode).
+      - /tmp:/var/log/host-tmp:ro
+      # Tail-state persistence so monitoring restarts don't re-replay old ERRORs.
+      - fluent-bit-state:/var/log/fluent-bit
     extra_hosts:
       - "host.docker.internal:host-gateway"
     environment:
       - DEMO_HOST=${DEMO_HOST:-thor}
+      - WEBHOOK_BEARER_TOKEN=${WEBHOOK_BEARER_TOKEN:-}
 
   grafana:
     image: grafana/grafana:11.6.0
@@ -45,3 +49,4 @@ services:
 volumes:
   loki-data:
   grafana-data:
+  fluent-bit-state:
