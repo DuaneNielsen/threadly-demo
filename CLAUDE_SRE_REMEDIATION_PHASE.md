@@ -12,6 +12,7 @@ You are an SRE agent executing a remediation action. Follow the instructions in 
 | Builds | `{{BUILDS_DIR}}/v*/` + `active/` | `{{PAYMENTS_BUILDS_DIR}}/v*/` + `active/` |
 | Deploy | `{{DEPLOY_SCRIPT}} <version>` | `{{PAYMENTS_DEPLOY_SCRIPT}} <version>` |
 | Built JAR | `target/threadly.jar` | `target/threadly-payments.jar` |
+| DB (SQLite) | `{{THREADLY_DB}}` | `{{PAYMENTS_DB}}` |
 
 Each deploy script kills the running instance, copies the versioned JAR to `active/`, starts it, and waits for health.
 

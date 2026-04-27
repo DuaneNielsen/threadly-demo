@@ -15,7 +15,7 @@ This stack is **two independent Spring Boot services**. Always identify which on
 | Builds | `{{BUILDS_DIR}}/v*/` | `{{PAYMENTS_BUILDS_DIR}}/v*/` |
 | Deploy script | `{{DEPLOY_SCRIPT}} <version>` | `{{PAYMENTS_DEPLOY_SCRIPT}} <version>` |
 | Framework | Spring Boot 3.4, MVC, JPA, Thymeleaf | Spring Boot 3.4, MVC, JPA |
-| DB | PostgreSQL (default) / H2 (`h2` profile) | H2 in-memory |
+| DB | SQLite (`{{THREADLY_DB}}`) | SQLite (`{{PAYMENTS_DB}}`) |
 | Java | 21 | 21 |
 
 The storefront calls the payment service over HTTP at `{{PAYMENTS_URL}}/v1/charges`. A {{PAYMENTS_NAME}} failure can surface as a failed checkout in {{APP_NAME}}.
@@ -49,8 +49,18 @@ The storefront calls the payment service over HTTP at `{{PAYMENTS_URL}}/v1/charg
 
 ## Database
 
-- **{{APP_NAME}}:** `products`, `orders`, `order_items`
-- Seed products are named after dev errors (Segfault, Stack Trace, Heisenbug, Race Condition, Deadlock, Kernel Panic, I'm a Teapot). "I'm a Teapot" is a free-giveaway item with `original_price = 0.00` — a legitimate edge case.
+Both services use **SQLite** (single file, file-backed, persists across restarts):
+- **{{APP_NAME}}** → `{{THREADLY_DB}}` — tables: `products`, `orders`, `order_items`
+- **{{PAYMENTS_NAME}}** → `{{PAYMENTS_DB}}` — tables: `charges`
+
+Seed products in {{APP_NAME}} are named after dev errors (Segfault, Stack Trace, Heisenbug, Race Condition, Deadlock, Kernel Panic, I'm a Teapot). "I'm a Teapot" is a free-giveaway item with `original_price = 0.00` — a legitimate edge case.
+
+If a bug involves persisted state, inspect directly with the `sqlite3` CLI:
+```bash
+sqlite3 {{THREADLY_DB}} '.tables'
+sqlite3 {{THREADLY_DB}} 'SELECT id, email, status, total FROM orders ORDER BY id DESC LIMIT 10;'
+sqlite3 {{PAYMENTS_DB}} 'SELECT id, status, amount FROM charges ORDER BY created DESC LIMIT 10;'
+```
 
 ## Versioning
 

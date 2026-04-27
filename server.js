@@ -41,6 +41,8 @@ const PAYMENTS_NAME = process.env.PAYMENTS_NAME || 'ThreadlyPayments';
 const PAYMENTS_PORT = process.env.PAYMENTS_PORT || '8181';
 const PAYMENTS_LOG = process.env.PAYMENTS_LOG || '/tmp/payments.log';
 const PAYMENTS_URL = process.env.PAYMENTS_URL || 'http://localhost:8181';
+const THREADLY_DB = process.env.THREADLY_DB || '/tmp/threadly.db';
+const PAYMENTS_DB = process.env.PAYMENTS_DB || '/tmp/payments.db';
 
 let state = 'idle'; // idle | analyzing | awaiting_choice | executing
 let sseClients = [];
@@ -85,6 +87,8 @@ function renderPrompt(filePath) {
     PAYMENTS_LOG,
     PAYMENTS_URL,
     PAYMENTS_DEPLOY_SCRIPT: path.join(__dirname, 'deploy-payments.sh'),
+    THREADLY_DB,
+    PAYMENTS_DB,
   };
   for (const [key, val] of Object.entries(vars)) {
     text = text.replaceAll(`{{${key}}}`, val);
@@ -113,7 +117,7 @@ function dispatchClaude(prompt, phase, contextFile) {
     ];
 
     if (phase === 1) {
-      args.push('--allowedTools', 'Read,Grep,Glob,Bash(tail *),Bash(cat *),Bash(head *),Bash(grep *),Bash(awk *),Bash(cd *),Bash(git *)');
+      args.push('--allowedTools', 'Read,Grep,Glob,Bash(tail *),Bash(cat *),Bash(head *),Bash(grep *),Bash(awk *),Bash(cd *),Bash(git *),Bash(sqlite3 *)');
     } else {
       args.push('--allowedTools', 'Read,Edit,Grep,Glob,Bash');
       args.push('--dangerously-skip-permissions');
