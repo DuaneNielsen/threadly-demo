@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Threadly Closed-Loop Remediation</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header>
+    <h1 id="demoTitle">Threadly <span>Closed-Loop Remediation</span></h1>
+    <div class="header-right">
+      <div class="version-badge" id="version">--</div>
+      <div class="status-badge" id="statusBadge">
+        <div class="status-dot"></div>
+        <span id="statusText">Connecting...</span>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <div class="controls">
+      <button class="scenario-btn" id="scenarioBtn" onclick="resetScenario()">Reset Scenario: Bad Code</button>
+      <button class="primary" id="simulateBtn" onclick="simulate()">Trigger Simulated Alarm</button>
+      <button class="danger" id="resetBtn" onclick="resetState()">Reset</button>
+    </div>
+    <div class="toast" id="toast"></div>
+
+    <!-- Trigger -->
+    <div class="trigger-panel" id="triggerPanel">
+      <div class="trigger-card">
+        <div class="trigger-header">
+          <span class="trigger-icon">&#x26A0;</span>
+          <span class="trigger-title" id="triggerTitle">Alarm Received</span>
+          <span class="trigger-severity" id="triggerSeverity"></span>
+        </div>
+        <div class="trigger-details" id="triggerDetails"></div>
+      </div>
+    </div>
+
+    <!-- Phase 1 Terminal -->
+    <div class="terminal" id="phase1Terminal">
+      <div class="terminal-header">
+        <span>Phase 1 &mdash; Analysis</span>
+        <span id="phase1Meta"></span>
+      </div>
+      <div class="terminal-body" id="phase1Log"></div>
+    </div>
+
+    <!-- Diagnosis + Options -->
+    <div class="diagnosis-panel" id="diagnosisPanel">
+      <div class="diagnosis-card">
+        <div class="rca-header">
+          <h2>Root Cause Analysis</h2>
+          <div class="rca-view-toggle">
+            <button class="view-tab active" data-view="formatted" onclick="switchRcaView('formatted')">Formatted</button>
+            <button class="view-tab" data-view="source" onclick="switchRcaView('source')">Source JSON</button>
+          </div>
+        </div>
+        <div class="rca-view" id="rcaFormatted">
+          <div class="detail" id="diagnosisDetail"></div>
+        </div>
+        <div class="rca-view" id="rcaSource" style="display:none">
+          <pre class="rca-json" id="rcaJson"></pre>
+        </div>
+      </div>
+      <div class="options-grid" id="optionsGrid"></div>
+    </div>
+
+    <!-- Phase 2 -->
+    <div class="phase2-panel" id="phase2Panel">
+      <div class="phase2-header" id="phase2Header">
+        Executing Remediation <span class="action-label" id="phase2Action"></span>
+      </div>
+      <div class="terminal">
+        <div class="terminal-header">
+          <span>Phase 2 &mdash; Execution</span>
+          <span id="phase2Meta"></span>
+        </div>
+        <div class="terminal-body" id="phase2Log"></div>
+      </div>
+    </div>
+
+    <!-- Completion -->
+    <div class="completion-banner" id="completionBanner">
+      <span id="completionIcon"></span>
+      <span id="completionText"></span>
+    </div>
+  </main>
+
+<script>
+const phase1Log = document.getElementById('phase1Log');
+const phase2Log = document.getElementById('phase2Log');
+const diagnosisPanel = document.getElementById('diagnosisPanel');
+const phase2Panel = document.getElementById('phase2Panel');
+const statusBadge = document.getElementById('statusBadge');
+const statusText = document.getElementById('statusText');
+const versionBadge = document.getElementById('version');
+const simulateBtn = document.getElementById('simulateBtn');
+const completionBanner = document.getElementById('completionBanner');
+
+const ICONS = { rollback: '\u21A9', fix: '\u2692', snow: '\u2709' };
+const ACTION_LABELS = { rollback: 'Rollback', fix: 'Code Fix', snow: 'SNOW Ticket' };
+const STATUS_LABELS = {
+  idle: 'Idle',
+  analyzing: 'Analyzing...',
+  awaiting_choice: 'Awaiting Choice',
+  executing: 'Executing...',
+};
+
+function appendLog(el, html) {
+  el.innerHTML += html;
+  el.scrollTop = el.scrollHeight;
+}
+
+const triggerPanel = document.getElementById('triggerPanel');
+
+function clearUI() {
+  phase1Log.innerHTML = '';
+  phase2Log.innerHTML = '';
+  diagnosisPanel.classList.remove('visible');
+  phase2Panel.classList.remove('visible');
+  triggerPanel.classList.remove('visible');
+  completionBanner.classList.remove('visible', 'success', 'error');
+  document.getElementById('phase1Meta').textContent = '';
+  document.getElementById('phase2Meta').textContent = '';
+  document.getElementById('optionsGrid').innerHTML = '';
+}
+
+function renderTrigger(trigger) {
+  document.getElementById('triggerTitle').textContent = trigger.alarm_name || 'Alarm Received';
+  const sev = document.getElementById('triggerSeverity');
+  sev.textContent = trigger.severity || '';
+  sev.className = 'trigger-severity ' + (trigger.severity || '').toLowerCase();
+
+  const rows = [
+    ['Status', trigger.status],
+    ['Source', trigger.alert_external_id],
+    ['Host', trigger.host],
+    ['Agent', trigger.agent],
+    ['Component', trigger.component],
+    ['Metric', trigger.metric_name ? `${trigger.metric_name} = ${trigger.metric_value}` : null],
+    ['Thresholds', trigger.caution_threshold ? `caution: ${trigger.caution_threshold} / danger: ${trigger.danger_threshold}` : null],
+    ['Type', trigger.alarm_type],
+    ['Message', trigger.message],
+    ['Time', trigger.timestamp ? new Date(trigger.timestamp).toLocaleString() : null],
+  ].filter(([, v]) => v);
+
+  document.getElementById('triggerDetails').innerHTML = rows.map(([label, value]) =>
+    `<div class="trigger-row"><span class="trigger-label">${esc(label)}</span><span class="trigger-value">${esc(value)}</span></div>`
+  ).join('');
+
+  triggerPanel.classList.add('visible');
+}
+
+function updateStatus(state, version) {
+  statusBadge.className = 'status-badge ' + state;
+  statusText.textContent = STATUS_LABELS[state] || state;
+  versionBadge.textContent = version || '--';
+  simulateBtn.disabled = state !== 'idle';
+}
+
+function simulate() {
+  clearUI();
+  const error = 'java.lang.ArithmeticException: / by zero\n\tat com.threadly.discount.DiscountCalculator.percentOff(DiscountCalculator.java:15)';
+  fetch('/simulate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ error }),
+  });
+}
+
+function executeOption(optionId) {
+  document.querySelectorAll('.execute-btn').forEach(b => b.disabled = true);
+  fetch('/execute', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ optionId }),
+  });
+}
+
+function resetState() {
+  fetch('/reset', { method: 'POST' });
+  clearUI();
+}
+
+function showToast(message, type) {
+  const toast = document.getElementById('toast');
+  toast.textContent = message;
+  toast.className = 'toast visible ' + type;
+  clearTimeout(toast._timer);
+  toast._timer = setTimeout(() => toast.classList.remove('visible'), 4000);
+}
+
+function resetScenario() {
+  const btn = document.getElementById('scenarioBtn');
+  btn.disabled = true;
+  btn.textContent = 'Deploying v1.1...';
+  showToast('Deploying buggy version (v1.1)...', 'info');
+  clearUI();
+  fetch('/reset', { method: 'POST' });
+  fetch('/deploy', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ version: 'v1.1' }),
+  });
+}
+
+function renderOptions(diagnosis, options) {
+  const detail = document.getElementById('diagnosisDetail');
+  let html = `
+    <div class="diag-row">
+      <span class="diag-label">Exception</span>
+      <span class="diag-value error-text">${esc(diagnosis.error_type)}</span>
+    </div>
+    <div class="diag-row">
+      <span class="diag-label">Location</span>
+      <span class="diag-value"><code>${esc(diagnosis.file)}:${diagnosis.line}</code></span>
+    </div>
+    <div class="diag-row">
+      <span class="diag-label">Version</span>
+      <span class="diag-value"><code>${esc(diagnosis.current_version)}</code></span>
+    </div>
+  `;
+
+  if (diagnosis.user_impact) {
+    html += `
+    <div class="diag-section">
+      <div class="diag-section-title">User Impact</div>
+      <div class="diag-section-body impact">${esc(diagnosis.user_impact)}</div>
+    </div>`;
+  }
+
+  html += `
+    <div class="diag-section">
+      <div class="diag-section-title">Root Cause Analysis</div>
+      <div class="diag-section-body">${esc(diagnosis.diagnosis)}</div>
+    </div>`;
+
+  if (diagnosis.code_snippet) {
+    html += `
+    <div class="diag-section">
+      <div class="diag-section-title">Problematic Code</div>
+      <pre class="diag-code">${esc(diagnosis.code_snippet)}</pre>
+    </div>`;
+  }
+
+  if (diagnosis.log_excerpt) {
+    html += `
+    <div class="diag-section">
+      <div class="diag-section-title">Log Output</div>
+      <pre class="diag-log">${esc(diagnosis.log_excerpt)}</pre>
+    </div>`;
+  }
+
+  detail.innerHTML = html;
+
+  const grid = document.getElementById('optionsGrid');
+  grid.innerHTML = '';
+
+  options.forEach((opt, i) => {
+    const isTop = i === 0;
+    const confClass = opt.confidence >= 80 ? 'high' : opt.confidence >= 50 ? 'medium' : 'low';
+    const card = document.createElement('div');
+    card.className = 'option-card' + (isTop ? ' recommended' : '');
+    card.innerHTML = `
+      ${isTop ? '<div class="recommended-badge">Recommended</div>' : ''}
+      <div class="option-header">
+        <div class="option-action">
+          <div class="option-icon ${opt.action}">${ICONS[opt.action] || '?'}</div>
+          <div class="option-title">${esc(opt.recommendation)}</div>
+        </div>
+        <div class="confidence-bar">
+          <div class="confidence-track">
+            <div class="confidence-fill ${confClass}" style="width:${opt.confidence}%"></div>
+          </div>
+          <div class="confidence-label">${opt.confidence}%</div>
+        </div>
+      </div>
+      <div class="option-description">${esc(opt.description)}</div>
+      <div class="option-risk"><strong>Risk:</strong> ${esc(opt.risk)}</div>
+      <button class="execute-btn ${opt.action}" onclick="executeOption(${opt.id})">
+        Execute: ${ACTION_LABELS[opt.action] || opt.action}
+      </button>
+    `;
+    grid.appendChild(card);
+  });
+
+  diagnosisPanel.classList.add('visible');
+}
+
+function switchRcaView(view) {
+  document.getElementById('rcaFormatted').style.display = view === 'formatted' ? '' : 'none';
+  document.getElementById('rcaSource').style.display = view === 'source' ? '' : 'none';
+  document.querySelectorAll('.view-tab').forEach(t => t.classList.toggle('active', t.dataset.view === view));
+}
+
+function esc(s) {
+  if (!s) return '';
+  const el = document.createElement('span');
+  el.textContent = String(s);
+  return el.innerHTML;
+}
+
+// SSE
+let evtSource;
+function connect() {
+  evtSource = new EventSource('/events');
+
+  evtSource.addEventListener('status', (e) => {
+    const d = JSON.parse(e.data);
+    if (d.state === 'analyzing' && statusText.textContent !== 'Analyzing...') {
+      clearUI();
+    }
+    updateStatus(d.state, d.version);
+  });
+
+  evtSource.addEventListener('trigger', (e) => {
+    const d = JSON.parse(e.data);
+    renderTrigger(d);
+  });
+
+  evtSource.addEventListener('phase1_stream', (e) => {
+    const d = JSON.parse(e.data);
+    appendLog(phase1Log, `<span class="log-text">${esc(d.text)}</span>\n`);
+  });
+
+  evtSource.addEventListener('phase1_tool', (e) => {
+    const d = JSON.parse(e.data);
+    appendLog(phase1Log, `<span class="log-tool">${esc(d.tool)}</span> <span class="log-tool-input">${esc(d.input)}</span>\n`);
+  });
+
+  evtSource.addEventListener('phase1_meta', (e) => {
+    const d = JSON.parse(e.data);
+    document.getElementById('phase1Meta').textContent = `${d.turns} turns | ${d.duration.toFixed(1)}s | $${d.cost.toFixed(3)}`;
+  });
+
+  evtSource.addEventListener('phase1_complete', (e) => {
+    const d = JSON.parse(e.data);
+    renderOptions(d.diagnosis, d.options);
+    if (d.raw_json) {
+      document.getElementById('rcaJson').textContent = d.raw_json;
+    }
+  });
+
+  evtSource.addEventListener('phase2_start', (e) => {
+    const d = JSON.parse(e.data);
+    phase2Panel.classList.add('visible');
+    const actionEl = document.getElementById('phase2Action');
+    actionEl.textContent = ACTION_LABELS[d.action] || d.action;
+    actionEl.className = 'action-label ' + d.action;
+    phase2Log.innerHTML = '';
+  });
+
+  evtSource.addEventListener('phase2_stream', (e) => {
+    const d = JSON.parse(e.data);
+    appendLog(phase2Log, `<span class="log-text">${esc(d.text)}</span>\n`);
+  });
+
+  evtSource.addEventListener('phase2_tool', (e) => {
+    const d = JSON.parse(e.data);
+    appendLog(phase2Log, `<span class="log-tool">${esc(d.tool)}</span> <span class="log-tool-input">${esc(d.input)}</span>\n`);
+  });
+
+  evtSource.addEventListener('phase2_meta', (e) => {
+    const d = JSON.parse(e.data);
+    document.getElementById('phase2Meta').textContent = `${d.turns} turns | ${d.duration.toFixed(1)}s | $${d.cost.toFixed(3)}`;
+  });
+
+  evtSource.addEventListener('phase2_complete', (e) => {
+    const d = JSON.parse(e.data);
+    completionBanner.classList.add('visible', 'success');
+    document.getElementById('completionIcon').textContent = '\u2713';
+    document.getElementById('completionText').textContent = `${ACTION_LABELS[d.action] || d.action} completed successfully`;
+  });
+
+  evtSource.addEventListener('deploy_complete', (e) => {
+    const d = JSON.parse(e.data);
+    const btn = document.getElementById('scenarioBtn');
+    btn.disabled = false;
+    btn.textContent = 'Reset Scenario: Bad Code';
+    if (d.success) {
+      showToast('Scenario ready — v1.1 (buggy) deployed', 'success');
+    } else {
+      showToast('Deploy failed: ' + (d.output || 'unknown error').slice(0, 100), 'error');
+    }
+  });
+
+  evtSource.addEventListener('error', (e) => {
+    if (e.data) {
+      const d = JSON.parse(e.data);
+      appendLog(phase1Log, `<span class="log-error">${esc(d.message)}</span>\n`);
+      completionBanner.classList.add('visible', 'error');
+      document.getElementById('completionIcon').textContent = '\u2717';
+      document.getElementById('completionText').textContent = d.message;
+    }
+  });
+
+  evtSource.onerror = () => {
+    evtSource.close();
+    setTimeout(connect, 3000);
+  };
+}
+
+// On load, check current state
+fetch('/status').then(r => r.json()).then(d => {
+  updateStatus(d.state, d.version);
+  if (d.title) {
+    const m = d.title.match(/^(.+?)\s+(Closed-Loop Remediation)$/i);
+    if (m) {
+      document.getElementById('demoTitle').innerHTML = `${esc(m[1])} <span>${esc(m[2])}</span>`;
+    } else {
+      document.getElementById('demoTitle').textContent = d.title;
+    }
+    document.title = d.title;
+  }
+  if (d.trigger) renderTrigger(d.trigger);
+  if (d.state === 'awaiting_choice' && d.diagnosis && d.options) {
+    renderOptions(d.diagnosis, d.options);
+  }
+});
+
+connect();
+</script>
+</body>
+</html>

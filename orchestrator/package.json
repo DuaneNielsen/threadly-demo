@@ -1,0 +1,14 @@
+{
+  "name": "closed-loop-remediation-demo",
+  "version": "2.0.0",
+  "description": "DX OI closed-loop remediation demo with Claude Code",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "setup": "bash setup.sh"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "private": true
+}
