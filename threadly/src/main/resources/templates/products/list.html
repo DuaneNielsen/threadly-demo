@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="en">
+<head th:replace="~{fragments/layout :: head('Shop - Threadly')}"></head>
+<body>
+<header th:replace="~{fragments/layout :: header}"></header>
+
+<main class="wrap">
+    <section class="hero">
+        <h1>threads never drop.</h1>
+        <p class="lede">Small-batch tees. Good cotton. Ships in a box that doesn't suck.</p>
+    </section>
+
+    <section class="grid">
+        <article class="card" th:each="p : ${products}">
+            <a th:href="@{/products/{id}(id=${p.id})}" class="card-link">
+                <div class="card-img">
+                    <img th:src="@{${p.imageUrl}}" th:alt="${p.name}"/>
+                    <span class="card-img-label" th:text="${p.category}">tees</span>
+                </div>
+                <div class="card-body">
+                    <h3 th:text="${p.name}">Product Name</h3>
+                    <div class="card-meta">
+                        <span th:text="${p.color}">color</span>
+                        <span>&middot;</span>
+                        <span th:text="${p.size}">size</span>
+                    </div>
+                    <div class="card-price">
+                        <span class="price" th:text="'$' + ${#numbers.formatDecimal(p.price, 1, 2)}">$24.00</span>
+                        <span class="price-original"
+                              th:if="${p.originalPrice != null and p.originalPrice.compareTo(p.price) > 0}"
+                              th:text="'$' + ${#numbers.formatDecimal(p.originalPrice, 1, 2)}">$30.00</span>
+                    </div>
+                </div>
+            </a>
+            <form method="post" th:action="@{/cart/add/{id}(id=${p.id})}" class="card-add">
+                <button type="submit" class="btn-secondary btn-small">Add to cart</button>
+            </form>
+        </article>
+    </section>
+</main>
+
+<footer th:replace="~{fragments/layout :: footer}"></footer>
+</body>
+</html>

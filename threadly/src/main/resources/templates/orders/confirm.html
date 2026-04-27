@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="en">
+<head th:replace="~{fragments/layout :: head('Order confirmed - Threadly')}"></head>
+<body>
+<header th:replace="~{fragments/layout :: header}"></header>
+
+<main class="wrap order-confirm">
+    <div class="confirm-card">
+        <span class="confirm-badge">Order placed</span>
+        <h1>Thanks — your threads are on their way.</h1>
+        <p class="confirm-meta">
+            Order <strong th:text="'#' + ${order.id}">#1</strong>
+            <span th:if="${order.paymentChargeId != null}">
+                &middot; charge <code th:text="${order.paymentChargeId}">ch_xxx</code>
+            </span>
+        </p>
+
+        <h2>Items</h2>
+        <ul class="confirm-items">
+            <li th:each="item : ${order.items}">
+                <span th:text="${item.qty} + ' &times; ' + ${item.nameSnapshot}">1 x Item</span>
+                <span th:text="'$' + ${#numbers.formatDecimal(item.lineTotal, 1, 2)}">$0.00</span>
+            </li>
+        </ul>
+
+        <div class="cart-totals">
+            <div><span>Subtotal</span><span th:text="'$' + ${#numbers.formatDecimal(order.subtotal, 1, 2)}">$0.00</span></div>
+            <div><span>Shipping</span><span th:text="'$' + ${#numbers.formatDecimal(order.shipping, 1, 2)}">$5.00</span></div>
+            <div><span>Tax</span><span th:text="'$' + ${#numbers.formatDecimal(order.tax, 1, 2)}">$0.00</span></div>
+            <div class="cart-total-line"><span>Total</span><span th:text="'$' + ${#numbers.formatDecimal(order.total, 1, 2)}">$0.00</span></div>
+        </div>
+
+        <h2>Shipping to</h2>
+        <address class="confirm-address">
+            <div th:text="${order.shipName}">Name</div>
+            <div th:text="${order.shipAddr1}">123 Main</div>
+            <div th:if="${order.shipAddr2 != null and !order.shipAddr2.isBlank()}" th:text="${order.shipAddr2}">Apt 2</div>
+            <div>
+                <span th:text="${order.shipCity}">City</span>,
+                <span th:text="${order.shipState}">ST</span>
+                <span th:text="${order.shipZip}">00000</span>
+            </div>
+            <div th:text="${order.email}">email</div>
+        </address>
+
+        <a class="btn-secondary" th:href="@{/products}">Keep shopping</a>
+    </div>
+</main>
+
+<footer th:replace="~{fragments/layout :: footer}"></footer>
+</body>
+</html>

@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="en">
+<head th:fragment="head(title)">
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title th:text="${title} ?: 'Threadly'">Threadly</title>
+    <link rel="stylesheet" th:href="@{/css/threadly.css}"/>
+</head>
+<body>
+<header th:fragment="header" class="site-header">
+    <div class="wrap">
+        <a class="brand" th:href="@{/products}">
+            <span class="brand-mark">threadly.</span>
+            <span class="brand-tag">threads never drop</span>
+        </a>
+        <nav>
+            <a th:href="@{/products}">Shop</a>
+            <a href="#">Journal</a>
+            <a href="#">Account</a>
+            <a th:href="@{/cart}" class="cart-link">
+                Cart
+                <span class="cart-badge" th:if="${cartCount != null and cartCount > 0}" th:text="${cartCount}">0</span>
+            </a>
+        </nav>
+    </div>
+</header>
+
+<footer th:fragment="footer" class="site-footer">
+    <div class="wrap">
+        <span>&copy; Threadly</span>
+        <span>threads never drop.</span>
+    </div>
+</footer>
+</body>
+</html>
