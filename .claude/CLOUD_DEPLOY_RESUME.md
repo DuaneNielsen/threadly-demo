@@ -1,10 +1,10 @@
 # Cloud Deploy — Resume Plan
 
-**Pause point:** Phases A–H complete. Site is live at `https://demo.agenticdemo.dev/`, Google sign-in works for the allowlisted email, and the closed-loop UI loads end-to-end. Two browser-side gotchas caught and resolved during the partner sign-in (see Phase H outcomes + new caveats). Open follow-up: the Threadly storefront isn't externally exposed yet — see "Open questions". Tip is on `main` (post-Phase-H doc-and-unit-update commit).
+**Pause point:** Phases A–I complete. Both `https://demo.agenticdemo.dev/` (closed-loop UI) and `https://threadly.agenticdemo.dev/` (Threadly storefront) are live, behind the same Google sign-in + email allowlist, and share auth via a `.agenticdemo.dev` cookie. Tip is on `main` (post-Phase-I subdomain commit).
 
-**Date paused:** 2026-04-28 (Phase H complete; partner sign-in verified).
+**Date paused:** 2026-04-28 (Phase I complete; Threadly storefront externally exposed).
 
-**Publicly reachable.** From any browser: `https://demo.agenticdemo.dev/` → Google sign-in (allowlisted emails only) → closed-loop UI (state=idle, version=v1.1). From any client: `POST /webhook` with the correct `Authorization: Bearer …` returns 200 and triggers analysis; missing or wrong bearer returns 401.
+**Publicly reachable.** From any browser: `https://demo.agenticdemo.dev/` → Google sign-in (allowlisted emails only) → closed-loop UI (state=idle, version=v1.1); `https://threadly.agenticdemo.dev/` → same sign-in → Threadly storefront (`/products/7` triggers the planted bug → fluent-bit → demo-server pipeline). From any client: `POST /webhook` with the correct `Authorization: Bearer …` returns 200 and triggers analysis; missing or wrong bearer returns 401.
 
 The architectural plan lives in `orchestrator/CLOUD_DEPLOY_PLAN.md` — read that first for the WHY. This file is the operational checklist for picking up where we left off. Live cloud-deploy state (project IDs, IPs, secret paths, common ops) is in the auto-loaded memory file `cloud_deploy_resources.md` for the agentic-sre-demo project.
 
@@ -180,8 +180,26 @@ Still optional (not run yet — low priority):
 - **22-23.** Click-through end-to-end of rollback / code-fix remediation — the deploy.sh path was already verified in isolation during Phase E.4 issue cleanup; the click-through just confirms it through the Phase 2 Claude dispatch.
 - **24.** `grep AUDIT /tmp/claude-sre.log` after a browser session — should show your email tied to each click. Confirmed the `audit()` helper writes the right line via curl simulation; just hasn't been tested through a real OAuth-attached browser session yet.
 
+### Phase I — Threadly storefront subdomain ✅ DONE 2026-04-28
+
+Outcomes (all in commit `9106523`):
+- **Cloudflare A record** `threadly.agenticdemo.dev` → `34.136.214.114` (DNS only, gray cloud, TTL=auto). Record id `6e0b0d8e8934f3668346a51c8cc66937`.
+- **Caddyfile** gained a `threadly.agenticdemo.dev` site block — same forward_auth + redirect-to-sign-in pattern as `demo.`, but reverse-proxies to `127.0.0.1:8180` (Threadly storefront) and has no `/webhook` bypass (the bearer-only webhook is demo-server only). Let's Encrypt cert obtained via `tls-alpn-01` (issuer E8, expires 2026-07-26).
+- **oauth2-proxy unit** gained `--whitelist-domain=threadly.agenticdemo.dev` (so post-login redirects back to threadly. are allowed) and `--cookie-domain=.agenticdemo.dev` (so a single sign-in covers both subdomains). Verified at boot: `Cookie settings: … domains:.agenticdemo.dev …`.
+- **Google Cloud Console — NO change.** The OAuth client's only registered redirect URI is still `https://demo.agenticdemo.dev/oauth2/callback`, which the threadly. flow funnels through (`--redirect-url` is fixed). Whitelist + shared cookie do the rest. If a future need arises (e.g. independent OAuth flows per subdomain), add `https://threadly.agenticdemo.dev/oauth2/callback` to the client.
+
+Verified externally:
+- `curl -sI https://threadly.agenticdemo.dev/` → `302 → /oauth2/sign_in?rd=…/`
+- `curl -sI https://threadly.agenticdemo.dev/products/7` → `302 → /oauth2/sign_in?rd=…/products/7`
+- `curl -sI https://demo.agenticdemo.dev/` still → 302 (no regression).
+
+Gotchas to remember (write-up captured here so future-you doesn't relitigate them):
+- **First visit to threadly. after the change requires a fresh sign-in even when already signed into demo.** The pre-existing `_oauth2_proxy` cookie on `demo.agenticdemo.dev` is host-only (set before `--cookie-domain` was added). Browsers won't send a host-only cookie cross-subdomain. The fresh sign-in produces a `Domain=.agenticdemo.dev` cookie; from then on, both hosts share auth. To skip the relogin, manually clear the host-only `_oauth2_proxy` cookie for `demo.agenticdemo.dev` first.
+- **`--redirect-url` is global, not per-host.** Even on `threadly.`, oauth2-proxy sends `redirect_uri=https://demo.agenticdemo.dev/oauth2/callback` to Google. The user's URL bar briefly transits demo. mid-flow before bouncing back to threadly. via `rd=`. This is fine and intentional — keeping a single canonical callback host avoids needing to re-register URIs on the OAuth client.
+- **`--whitelist-domain` can be repeated.** The unit now has two; oauth2-proxy parses each one as a separate allowed redirect host. Don't try to comma-join them.
+- **Adding more subdomains:** repeat the four steps — Cloudflare A record, Caddy site block (reverse_proxy to the right local port), `--whitelist-domain=<host>` in the oauth2-proxy unit, daemon-reload + restart. Cookie-domain stays as `.agenticdemo.dev`. No Console change unless you want a per-host callback.
+
 ## Open questions to resolve at resume time
-- **Threadly storefront isn't externally exposed yet.** Currently only the closed-loop UI (`demo.agenticdemo.dev` → demo-server :5000) is reachable; the Threadly app on `:8180` is VM-internal. To let partners trigger real errors by browsing `/products/7`, set up a second hostname (proposal: `threadly.agenticdemo.dev`) — Cloudflare A record to `34.136.214.114`, new Caddy site block reverse-proxying `127.0.0.1:8180`, gated by the same oauth2-proxy. Decision deferred — at demo time the "Trigger Simulated Alarm" button on the closed-loop UI is the alternative path. If we add the subdomain, remember to also add `--whitelist-domain=threadly.agenticdemo.dev` to oauth2-proxy and add the redirect URI `https://threadly.agenticdemo.dev/oauth2/callback` on the OAuth client.
 - JAR sizes in the monorepo (~55-66MB each) — does `git clone` complete fast enough on the VM, or move to GitHub Releases? (Not yet a real problem; the VM was cloned successfully in Phase E.3.)
 - OAuth consent screen is in Testing mode — Google currently lets up to 100 test users sign in. For partner expansion past that, either move to "In Production" (requires verification for sensitive scopes — we only use email/profile so should be quick) or stay in Testing and add each partner as a test user in Auth Platform → Audience.
 - Optional ops hardening: log rotation for `/tmp/claude-sre.log` (currently grows unbounded), Anthropic spend alerting at the $25 / $40 thresholds (cap is $50/mo), automatic OAuth consent-screen verification once the partner list grows.
