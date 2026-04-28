@@ -5,6 +5,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 const readline = require('node:readline');
+const crypto = require('node:crypto');
 
 // Load .env file (env vars take precedence)
 const envPath = path.join(__dirname, '.env');
@@ -361,6 +362,22 @@ function jsonResponse(res, code, data) {
   res.end(JSON.stringify(data));
 }
 
+function audit(req, action) {
+  const email = req.headers['x-auth-request-email'] || 'anon';
+  const line = `[${new Date().toISOString()}] AUDIT user=${email} action=${action}\n`;
+  try { fs.appendFileSync(LOG_FILE, line); } catch {}
+}
+
+function checkWebhookBearer(req) {
+  const expected = process.env.WEBHOOK_BEARER_TOKEN;
+  if (!expected) return true; // local dev: no token configured, no check
+  const auth = req.headers['authorization'] || '';
+  const provided = auth.startsWith('Bearer ') ? auth.slice(7) : '';
+  const a = Buffer.from(provided);
+  const b = Buffer.from(expected);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
 
@@ -406,6 +423,9 @@ const server = http.createServer(async (req, res) => {
     catch { return jsonResponse(res, 400, { error: 'Invalid JSON' }); }
 
     if (url.pathname === '/webhook') {
+      if (!checkWebhookBearer(req)) {
+        return jsonResponse(res, 401, { error: 'Unauthorized' });
+      }
       if (Array.isArray(payload)) payload = payload[0] || {};
       const triggerInfo = {
         alarm_name: payload.alarm_name || payload['Alarm Name'] || payload.alarmName || 'Unknown',
@@ -447,6 +467,7 @@ const server = http.createServer(async (req, res) => {
         timestamp: new Date().toISOString(),
       };
       console.log(`[SIMULATE] Alarm: ${triggerInfo.alarm_name}`);
+      audit(req, 'simulate');
       jsonResponse(res, 200, { status: 'accepted' });
       runPhase1(triggerInfo, 'DX Operational Intelligence (simulated)');
       return;
@@ -456,12 +477,14 @@ const server = http.createServer(async (req, res) => {
       const optionId = payload.optionId;
       if (!optionId) return jsonResponse(res, 400, { error: "Missing 'optionId'" });
       console.log(`[EXECUTE] User chose option ${optionId}`);
+      audit(req, `execute option=${optionId}`);
       jsonResponse(res, 200, { status: 'accepted' });
       runPhase2(optionId);
       return;
     }
 
     if (url.pathname === '/reset') {
+      audit(req, 'reset');
       setState('idle');
       currentOptions = null;
       currentDiagnosis = null;
@@ -473,6 +496,7 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/deploy') {
       const version = payload.version || 'v1.1';
       console.log(`[DEPLOY] Deploying ${version}...`);
+      audit(req, `deploy version=${version}`);
       broadcast('deploy_start', { version });
       const deployScript = path.join(__dirname, 'deploy.sh');
       const proc = spawn('bash', [deployScript, version], {
@@ -494,7 +518,7 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, '0.0.0.0', () => {
+server.listen(PORT, '127.0.0.1', () => {
   console.log(`${'='.repeat(60)}`);
   console.log(`  DX OI Closed-Loop Remediation Demo v2`);
   console.log(`${'='.repeat(60)}`);

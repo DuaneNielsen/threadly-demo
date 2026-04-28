@@ -1,0 +1,34 @@
+demo.agenticdemo.dev {
+	# /webhook is bearer-protected by server.js (Phase G.14) — no oauth.
+	# Caddy's default ~10MB request cap is the only ingress limit; the
+	# bearer + demo-server's 60s cooldown between dispatches is the rest
+	# of the protection. (rate_limit needs a 3rd-party plugin — skipped.)
+	@webhook path /webhook
+	handle @webhook {
+		reverse_proxy 127.0.0.1:5000
+	}
+
+	# oauth2-proxy's own paths (sign-in, callback, sign-out, etc.)
+	# served directly so the OAuth dance can complete without recursion.
+	handle /oauth2/* {
+		reverse_proxy 127.0.0.1:4180 {
+			header_up X-Real-IP {remote_host}
+			header_up X-Forwarded-Uri {uri}
+		}
+	}
+
+	# Everything else: gate via forward_auth. On 401, redirect the browser
+	# to /oauth2/sign_in with the original URL preserved in `rd`.
+	handle {
+		forward_auth 127.0.0.1:4180 {
+			uri /oauth2/auth
+			copy_headers X-Auth-Request-Email
+
+			@unauth status 401
+			handle_response @unauth {
+				redir * /oauth2/sign_in?rd={scheme}://{host}{uri}
+			}
+		}
+		reverse_proxy 127.0.0.1:5000
+	}
+}
