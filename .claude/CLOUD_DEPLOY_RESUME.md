@@ -1,10 +1,10 @@
 # Cloud Deploy — Resume Plan
 
-**Pause point:** Phases A through E.4 complete. VM is provisioned, secrets staged, all 4 backend services running under systemd (threadly + threadly-payments + demo-server + monitoring), 80/443 firewall is open, and the full pipeline is verified end-to-end on the VM (ERROR → fluent-bit → webhook → Claude → 3 remediation options at ~$0.27/analysis). Next step is Phase F — Caddy reverse proxy + oauth2-proxy + email allowlist.
+**Pause point:** Phases A–G complete and verified by curl. Site is publicly reachable at `https://demo.agenticdemo.dev/` — Caddy + oauth2-proxy gate the UI behind Google sign-in, `/webhook` is bypass-routed and bearer-protected, fluent-bit posts ERRORs with the bearer header, and Phase 1 analysis still completes end-to-end at ~$0.16. Tip is `b2a7990`. Phase H curl tests pass; the remaining browser-required tests (steps 18, 19, 22, 23, 24) need a real Google sign-in and a partner account for the unlisted-email check.
 
-**Date paused:** 2026-04-27 (Phase E.4 complete).
+**Date paused:** 2026-04-28 (Phases F + G + curlable Phase H complete).
 
-**Nothing publicly reachable yet** — backend services listen on the VM but Caddy is not yet running, so 80/443 are open at the firewall but nothing answers. `https://demo.agenticdemo.dev/` will resolve via DNS but connection times out until Phase F brings Caddy up.
+**Publicly reachable.** From any browser: `GET https://demo.agenticdemo.dev/` redirects to `/oauth2/sign_in` (Google OAuth gate). From any client: `POST /webhook` with the correct `Authorization: Bearer …` returns 200 and triggers analysis; missing or wrong bearer returns 401.
 
 The architectural plan lives in `orchestrator/CLOUD_DEPLOY_PLAN.md` — read that first for the WHY. This file is the operational checklist for picking up where we left off. Live cloud-deploy state (project IDs, IPs, secret paths, common ops) is in the auto-loaded memory file `cloud_deploy_resources.md` for the agentic-sre-demo project.
 
@@ -69,6 +69,10 @@ Phase E.2 — VM provisioned (2026-04-27):
 - **JAR sizes:** GitHub flagged warnings (~55-66MB each, over the 50MB recommended limit). Push went through (under 100MB hard limit) but `git clone` is slow. If it bites in production, move JARs to GitHub Releases and have `deploy.sh` curl them. Defer for now.
 - **`orchestrator/CLOUD_DEPLOY_PLAN.md` paths are pre-monorepo.** The plan was written when threadly + threadly-payments were sibling repos. Inside the monorepo, sibling-relative paths (`../threadly`, `../threadly-payments`) still work because `orchestrator/` is at the same level as the apps. So `.env.example` and `deploy.sh` don't need changes for the cloud — same relative layout.
 - **Fluent Bit bind-mount stale-inode workaround (RESOLVED in Phase E.4).** Originally the per-file bind mount went stale on app redeploy (Logback replaced the inode; fluent-bit held the old one). The canonical config now uses a directory bind-mount `/tmp:/var/log/host-tmp:ro` plus `inotify_watcher false` plus a persistent `DB` so tail-state survives container restarts. No longer a caveat — kept here for archaeology.
+- **oauth2-proxy v7+ rejects standard-base64 cookie secrets.** `openssl rand -base64 32` produces 44 chars with `+`/`/` — oauth2-proxy tries `base64.RawURLEncoding.DecodeString` (URL-safe base64 only), fails on `+`/`/`, falls back to treating the raw 44-char string as the AES key, and bails with `cookie_secret must be 16, 24, or 32 bytes`. Generate URL-safe instead: `python3 -c "import os, base64; print(base64.urlsafe_b64encode(os.urandom(32)).rstrip(b'=').decode())"` → 43 chars. Stored as v3 in Secret Manager; v1 (broken) and v2 (URL-safe but with `<<<` newline) are destroyed.
+- **`gcloud secrets versions add … <<< "$val"` adds a trailing `\n`.** Bash here-strings append a newline. Use `printf '%s' "$val" | gcloud secrets versions add …` for byte-exact secret content. The cookie-secret v2 was 44 bytes (43+`\n`) before re-pushing as v3 with printf.
+- **Don't bind demo-server to `127.0.0.1`** — fluent-bit reaches it via the docker bridge gateway (`host.docker.internal:host-gateway`), not the VM's loopback. Phase G.13 made this mistake and produced `no upstream connections available to host.docker.internal:5000` until reverted in `b2a7990`. The actual external boundary for `:5000` is the GCP firewall (only 80/443 are open), so `0.0.0.0` is fine.
+- **Caddy `forward_auth` returns the upstream's status verbatim by default.** A bare `forward_auth 127.0.0.1:4180 { uri /oauth2/auth }` block sends 401 to the browser instead of redirecting to the sign-in flow. The canonical pattern is `handle_response @unauth { redir * /oauth2/sign_in?rd=… }` — the Caddyfile in `orchestrator/caddy/Caddyfile` has it.
 
 ## Remaining work, in order
 
@@ -98,7 +102,7 @@ Outcomes:
 - **Secrets materialized** to `/etc/threadly-demo/{anthropic,webhook,oauth2-proxy,gh}.env` — root:root mode 600, dir 700. systemd-style EnvironmentFile fragments for Phase E.4. NOTE: `OAUTH2_PROXY_CLIENT_ID` is NOT yet on the VM (it's local at `~/.secrets/oauth2-proxy-client-id`); copy it over when wiring up oauth2-proxy.
 - **Claude CLI verified** with API-key auth — no `~/.claude` directory existed (clean state), `claude -p "PONG"` responds correctly when `ANTHROPIC_API_KEY` is in env.
 - **Apps running** in foreground (NOT yet under systemd): payments v1.0 on :8181, threadly v1.1 on :8180, both `/actuator/health` returning UP. `/products/7` returns HTTP 500 — planted bug fires as expected.
-- **Fluent Bit directory bind-mount applied:** `monitoring/docker-compose.yml` now mounts `/tmp:/var/log/host-tmp:ro` (not specific files); `fluent-bit.conf` paths updated to `/var/log/host-tmp/{threadly,payments}.log`. Originals saved as `.orig`. **These changes are NOT committed yet** — when you commit them along with the Phase G changes, the directory mount fix becomes the official version.
+- **Fluent Bit directory bind-mount applied:** `monitoring/docker-compose.yml` now mounts `/tmp:/var/log/host-tmp:ro` (not specific files); `fluent-bit.conf` paths updated to `/var/log/host-tmp/{threadly,payments}.log`. Originals saved as `.orig` on the VM. Committed as part of `b8b4df1` (Phase E.4) — local config and VM config are now in sync; this is the canonical layout.
 - **Monitoring stack up:** loki/fluent-bit/grafana containers via docker compose, all healthy. Verified end-to-end: trigger errors → ship to Loki → `{app="threadly"} |~ "ERROR"` returns lines.
 - **Webhook attempts are firing but failing silently** because nothing is listening on `:5000` yet (server.js comes up under systemd in Phase E.4).
 
@@ -132,98 +136,104 @@ All three resolved + verified on the VM in the same session:
 2. **Headless `claude` permissions.** Phase 1 analysis allowlist switched from fine-grained `Bash(tail *),Bash(grep *),...` patterns (which Claude Code doesn't reliably match across pipes like `tail ... | grep ... | tail ...`) to plain `Read,Grep,Glob,Bash` plus `--dangerously-skip-permissions`. Edit/Write are still excluded from Phase 1 so the read-only-investigation contract holds. Phase 2 allowlist gained `Write` (needed by the SNOW-ticket remediation path which writes a JSON file). Verified: latest run had **0 permission_denials** (down from 3-4), $0.16 cost (down from $0.27), 61s duration (down from 83s).
 3. **fluent-bit log re-replay on restart.** Added `DB /var/log/fluent-bit/{threadly,payments}.db` to both tail inputs, plus a named docker volume `fluent-bit-state` mounted at `/var/log/fluent-bit`. Tail offsets now persist across `systemctl restart monitoring`. Verified: webhook count stayed at 2 across a second restart with no new ERRORs in the log. Also synced local `docker-compose.yml` to use the directory bind-mount (`/tmp:/var/log/host-tmp:ro`) and pass `WEBHOOK_BEARER_TOKEN` env through to the fluent-bit container — that env will be consumed by Phase G.16's HTTP output bearer header.
 
-### Phase F — Reverse proxy + auth
-11. **oauth2-proxy** runs on `127.0.0.1:4180`. Key flags:
-    - `--provider=google`
-    - `--client-id` and `--client-secret` from Secret Manager
-    - `--cookie-secret` from Secret Manager
-    - `--authenticated-emails-file=/etc/oauth2-proxy/emails.txt` (start with just your email + a couple test partners)
-    - `--reverse-proxy=true` `--upstream=http://127.0.0.1:5000`
-    - `--redirect-url=https://demo.agenticdemo.dev/oauth2/callback`
-12. **Caddy** at `/etc/caddy/Caddyfile`:
-    ```
-    demo.agenticdemo.dev {
-        @webhook path /webhook
-        handle @webhook {
-            rate_limit { ... per-IP, ~10/min ... }
-            reverse_proxy 127.0.0.1:5000
-        }
-        handle {
-            forward_auth 127.0.0.1:4180 {
-                uri /oauth2/auth
-                copy_headers X-Auth-Request-Email
-            }
-            reverse_proxy 127.0.0.1:5000
-        }
-    }
-    ```
-13. Bind `server.js` to `127.0.0.1:5000` (not `0.0.0.0`) — Caddy is the only thing in front of it, no need for it to listen externally.
+### Phase F — Reverse proxy + auth ✅ DONE 2026-04-28
 
-### Phase G — server.js minor changes
-14. Add `Authorization: Bearer $WEBHOOK_BEARER_TOKEN` check on `/webhook`. **Skip the check if `WEBHOOK_BEARER_TOKEN` env var is unset** — preserves local-dev behavior with no auth.
-15. Read `X-Auth-Request-Email` header on UI requests, log it to `/tmp/claude-sre.log` so there's an audit trail of who triggered what.
-16. Update `monitoring/fluent-bit/fluent-bit.conf` HTTP output to send the bearer token too (matching server.js's expectation):
-    ```
-    [OUTPUT]
-        Name http
-        Match threadly_error
-        ...
-        Header Authorization Bearer ${WEBHOOK_BEARER_TOKEN}
-    ```
-    The bearer needs to be available to the fluent-bit container — env var passed through `docker-compose.yml`.
-17. Commit these changes to the monorepo and push (becomes the first non-trivial post-extraction commit).
+Outcomes:
+- **`/etc/oauth2-proxy/` populated:** `client-id.env` (mode 644, the GOCSPX… ID is non-secret), `emails.txt` (mode 644, seed `duane.nielsen.rocks@gmail.com`). System user `oauth2-proxy` (uid 994) created — referenced by the unit's `User=`.
+- **`oauth2-proxy.service` active** on `127.0.0.1:4180` (Google provider, allowlisted emails, cookie-secure=true, samesite=lax). Confirmed `/ping` → 200; startup log shows `using authenticated emails file …` and `OAuthProxy configured for Google Client ID`.
+- **`orchestrator/caddy/Caddyfile` is canonical** (committed in `b65e60f`); installed at `/etc/caddy/Caddyfile`. Three handlers: bearer-only `/webhook` bypass, direct reverse_proxy for `/oauth2/*`, `forward_auth` + redirect-to-sign-in on 401 for everything else. Rate_limit was DROPPED (third-party plugin not worth a custom Caddy build — bearer + 60s server.js cooldown is the rate budget).
+- **Caddy reloaded with auto-TLS:** Let's Encrypt cert obtained via `tls-alpn-01` in ~3 seconds (E7 issuer, expires 2026-07-26). HTTP→HTTPS 308 redirect is automatic.
 
-### Phase H — Verify
-18. From a partner Google account: hit `https://demo.agenticdemo.dev/` → Google login → UI loads.
-19. From an unlisted Google account → 403 from oauth2-proxy.
-20. `curl -X POST https://demo.agenticdemo.dev/webhook -d '{}'` (no bearer) → 401.
-21. With bearer header → analysis fires, streams to UI.
-22. Click rollback remediation → confirm `deploy.sh v1.0` runs, app comes back healthy serving 200 on `/products/7`.
-23. Click code-fix remediation → confirm a real PR appears at `https://github.com/DuaneNielsen/threadly-demo/pulls`.
-24. Check oauth2-proxy logs for the partner's email.
+Operational deltas:
+- Add a partner: SSH in, append email to `/etc/oauth2-proxy/emails.txt`, `sudo systemctl reload oauth2-proxy` (oauth2-proxy watches the file but reload guarantees pickup).
+- Open a port externally: edit Caddyfile, `sudo systemctl reload caddy`.
+
+### Phase G — server.js + fluent-bit minor changes ✅ DONE 2026-04-28
+
+Outcomes (all in `b65e60f`, with G.13 reverted in `b2a7990` — see gotcha below):
+- **Bearer check on `/webhook`** — `crypto.timingSafeEqual` against `WEBHOOK_BEARER_TOKEN`. If the env var is unset (local dev), the check is bypassed; preserves the no-auth-locally contract.
+- **`audit()` helper** appends one timestamped line per user action (`/simulate`, `/execute`, `/reset`, `/deploy`) to `/tmp/claude-sre.log`, including `X-Auth-Request-Email` (or `anon` if missing). The header is forwarded by Caddy via `copy_headers X-Auth-Request-Email` in the forward_auth block.
+- **fluent-bit `[OUTPUT] http`** for both `threadly_error` and `payments_error` now carries `Header Authorization Bearer ${WEBHOOK_BEARER_TOKEN}`. Env passthrough chain: `webhook.env` → systemd → `docker compose` → fluent-bit container env → conf substitution. Verified end-to-end: `/products/7` → 500 → fluent-bit → demo-server (`[WEBHOOK] Received alarm: Threadly Log Error`) → Phase 1 analysis → 3 options at ~$0.16.
+
+### Phase H — Verify ✅ curl path DONE 2026-04-28; browser path PENDING
+
+Curl-verifiable steps complete:
+- ✅ **20.** `POST /webhook` no bearer → 401; wrong bearer → 401; correct bearer → 200 + analysis fires.
+- ✅ **21.** External `curl` with bearer kicks off a real Phase 1 dispatch end-to-end.
+- ✅ **In-VM end-to-end.** `/products/7` → 500 → fluent-bit (with bearer header) → demo-server bearer check passes → runPhase1 → state=`awaiting_choice` with 3 options (rollback / fix / SNOW), confidence 95/85/40.
+- ✅ **`GET /` unauthenticated** → 302 redirect to `/oauth2/sign_in?rd=…`; `/oauth2/sign_in` itself returns 302 to Google.
+
+Browser-required (you, with a real Google account):
+- **18.** From your allowlisted Google account: hit `https://demo.agenticdemo.dev/` → Google login → UI loads, state=idle, version=v1.1.
+- **19.** From an unlisted Google account → 403 page from oauth2-proxy. (To test: temporarily delete your email from `/etc/oauth2-proxy/emails.txt` and reload, OR use a second Google account that isn't in the file.)
+- **22.** Click rollback remediation → confirm `deploy.sh v1.0` runs, `/products/7` returns 200. (The systemd-aware deploy.sh path was already verified during Phase E.4 issue cleanup.)
+- **23.** Click code-fix remediation → confirm a real PR appears at `https://github.com/DuaneNielsen/threadly-demo/pulls`.
+- **24.** `grep -E "AUDIT user=" /tmp/claude-sre.log` after a browser session — should show your email tied to each click.
 
 ## Open questions to resolve at resume time
-- Does `claude` CLI on the VM need any non-default config (e.g. `claude config set api-key-helper`)? Check what's needed for headless API-key-only auth on a fresh box.
-- JAR sizes in the monorepo (~55-66MB each) — does `git clone` complete fast enough on the VM, or move to GitHub Releases?
-- Caddy `rate_limit` directive: needs the third-party plugin or first-party feature? Verify which Caddy module is required and pull it in via `caddy build` if needed.
+- JAR sizes in the monorepo (~55-66MB each) — does `git clone` complete fast enough on the VM, or move to GitHub Releases? (Not yet a real problem; the VM was cloned successfully in Phase E.3.)
+- OAuth consent screen is in Testing mode — Google currently lets up to 100 test users sign in. For partner expansion past that, either move to "In Production" (requires verification for sensitive scopes — we only use email/profile so should be quick) or stay in Testing and add each partner as a test user in Auth Platform → Audience.
 
 ## Files of interest
 - `orchestrator/CLOUD_DEPLOY_PLAN.md` — architectural plan with cost table, threat model, security rationale
 - `orchestrator/server.js` — webhook receiver, state machine, Claude dispatch
 - `orchestrator/CLAUDE_SRE_ANALYSIS_PHASE.md` and `_REMEDIATION_PHASE.md` — system prompts
-- `orchestrator/deploy.sh` and `deploy-payments.sh` — JAR swap + restart
-- `orchestrator/monitoring/docker-compose.yml` — Loki + Fluent Bit + Grafana stack
-- `orchestrator/monitoring/fluent-bit/parsers.conf` — JUST FIXED for Spring Boot 3.4 format, don't break it
+- `orchestrator/deploy.sh` and `deploy-payments.sh` — systemd-aware JAR swap (Phase E.4 made these dual-use: cloud uses `sudo systemctl restart`, local uses `kill PID + java -jar &`)
+- `orchestrator/monitoring/docker-compose.yml` — Loki + Fluent Bit + Grafana stack (canonical layout: directory bind-mount + `fluent-bit-state` volume)
+- `orchestrator/monitoring/fluent-bit/parsers.conf` — Spring Boot 3.4 firstline parser; regex accepts both `Z` and `[+-]HH:MM` timezone suffixes (Phase E.4 fix). Don't re-narrow the timezone match.
+- `orchestrator/monitoring/fluent-bit/fluent-bit.conf` — tail inputs use `DB /var/log/fluent-bit/{threadly,payments}.db` for offset persistence
+- `orchestrator/systemd/` — unit files installed at `/etc/systemd/system/` on the VM
+- `orchestrator/caddy/Caddyfile` — Phase F config: bearer-only `/webhook`, oauth2-proxy `/oauth2/*` direct, forward_auth + redirect-to-sign-in for everything else
 - `orchestrator/.env.example` — config template
 
 ## Scratch space at resume
-When you pick this up at Phase E.3, first verify state from your laptop:
+
+Pick this up at Phase F. First verify state from your laptop:
+
 ```bash
 gcloud config list                                                          # should show project=agentic-sre-demo
 gcloud compute instances list --project=agentic-sre-demo                    # threadly-demo, RUNNING
 dig +short demo.agenticdemo.dev                                             # 34.136.214.114
+gcloud compute firewall-rules list --project=agentic-sre-demo               # expect allow-iap-ssh + allow-https + 2 default
 ```
+
 SSH in:
 ```bash
 gcloud compute ssh threadly-demo --zone=us-central1-a --tunnel-through-iap --project=agentic-sre-demo
 ```
 
-Drift checks before continuing into Phase E.4:
+Drift checks (covering Phases E + F):
 ```bash
-# Apps still running?
-lsof -ti:8180 -ti:8181 || echo "(apps not running — re-deploy via deploy.sh first)"
+# All 6 units active? (4 backend + oauth2-proxy + caddy)
+for u in threadly-payments threadly demo-server monitoring oauth2-proxy caddy; do
+    echo "$u: $(systemctl is-active $u) / $(systemctl is-enabled $u)"
+done
+
+# Apps healthy + bug fires?
 curl -sf http://localhost:8180/actuator/health | head -c 80
 curl -sf http://localhost:8181/actuator/health | head -c 80
-curl -s -o /dev/null -w "HTTP %{http_code}\n" http://localhost:8180/products/7  # expect 500
+curl -s -o /dev/null -w "/products/7 HTTP %{http_code}\n" http://localhost:8180/products/7   # expect 500
+curl -s http://localhost:5000/health                                                          # expect ok / state=idle
 
-# Monitoring stack still up?
-sudo docker compose -f /opt/threadly-demo/orchestrator/monitoring/docker-compose.yml ps
+# Webhook pipeline still live?
+curl -s http://localhost:3100/ready                                                           # Loki: ready
+sudo docker ps --format 'table {{.Names}}\t{{.Status}}'
 
-# Secrets still in place?
-sudo ls -la /etc/threadly-demo/
+# Phase F gates wired up?
+curl -sf http://127.0.0.1:4180/ping                                                           # oauth2-proxy
+sudo ss -tlnp | grep -E ':(80|443) '                                                          # caddy
 
 # Repo at expected commit?
-git -C /opt/threadly-demo log --oneline -3
+git -C /opt/threadly-demo log --oneline -3                                                    # b2a7990 should be tip
 ```
 
-If any of those have drifted, see Phase E.3 outcomes above for what to restore. Then start at Phase E.4.
+External-side checks (from your laptop):
+```bash
+curl -sI https://demo.agenticdemo.dev/                                                        # 302 to /oauth2/sign_in
+curl -s -o /dev/null -w "HTTP %{http_code}\n" -X POST https://demo.agenticdemo.dev/webhook    # 401 (no bearer)
+TOKEN=$(cat ~/.secrets/webhook-bearer-token)
+curl -s -X POST https://demo.agenticdemo.dev/webhook -H "Authorization: Bearer $TOKEN" \
+     -H "Content-Type: application/json" -d '{"alarm_name":"resume drift","severity":"Info"}' # 200 + analysis fires (~$0.16)
+```
+
+If any of those have drifted, see the corresponding phase outcomes for what to restore. Otherwise the next session is just (a) the browser-side Phase H steps (18, 19, 22, 23, 24) and (b) optional ops hardening — log rotation for `/tmp/claude-sre.log`, Anthropic spend alert thresholds, and an OAuth consent-screen verification path if expanding past 100 partners.
