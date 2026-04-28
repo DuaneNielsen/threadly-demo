@@ -518,7 +518,10 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, '127.0.0.1', () => {
+// Bind on all interfaces: Caddy is the public ingress (gates on bearer + oauth)
+// AND fluent-bit reaches us via docker's host-gateway, not VM localhost. The
+// GCP firewall (only 80/443 open) is the actual external boundary for :5000.
+server.listen(PORT, '0.0.0.0', () => {
   console.log(`${'='.repeat(60)}`);
   console.log(`  DX OI Closed-Loop Remediation Demo v2`);
   console.log(`${'='.repeat(60)}`);
