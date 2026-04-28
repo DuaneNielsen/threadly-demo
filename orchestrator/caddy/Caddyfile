@@ -32,3 +32,28 @@ demo.agenticdemo.dev {
 		reverse_proxy 127.0.0.1:5000
 	}
 }
+
+threadly.agenticdemo.dev {
+	# Threadly storefront. Same oauth2-proxy gate as demo. The cookie is
+	# scoped to .agenticdemo.dev (set in oauth2-proxy unit), so a single
+	# sign-in covers both hosts.
+	handle /oauth2/* {
+		reverse_proxy 127.0.0.1:4180 {
+			header_up X-Real-IP {remote_host}
+			header_up X-Forwarded-Uri {uri}
+		}
+	}
+
+	handle {
+		forward_auth 127.0.0.1:4180 {
+			uri /oauth2/auth
+			copy_headers X-Auth-Request-Email
+
+			@unauth status 401
+			handle_response @unauth {
+				redir * /oauth2/sign_in?rd={scheme}://{host}{uri}
+			}
+		}
+		reverse_proxy 127.0.0.1:8180
+	}
+}
