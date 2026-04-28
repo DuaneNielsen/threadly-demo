@@ -18,6 +18,7 @@ ExecStart=/usr/local/bin/oauth2-proxy \
   --redirect-url=https://demo.agenticdemo.dev/oauth2/callback \
   --authenticated-emails-file=/etc/oauth2-proxy/emails.txt \
   --email-domain=* \
+  --whitelist-domain=demo.agenticdemo.dev \
   --cookie-secure=true \
   --cookie-samesite=lax \
   --skip-provider-button=true

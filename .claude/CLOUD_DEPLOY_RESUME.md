@@ -1,10 +1,10 @@
 # Cloud Deploy — Resume Plan
 
-**Pause point:** Phases A–G complete and verified by curl. Site is publicly reachable at `https://demo.agenticdemo.dev/` — Caddy + oauth2-proxy gate the UI behind Google sign-in, `/webhook` is bypass-routed and bearer-protected, fluent-bit posts ERRORs with the bearer header, and Phase 1 analysis still completes end-to-end at ~$0.16. Tip is `b2a7990`. Phase H curl tests pass; the remaining browser-required tests (steps 18, 19, 22, 23, 24) need a real Google sign-in and a partner account for the unlisted-email check.
+**Pause point:** Phases A–H complete. Site is live at `https://demo.agenticdemo.dev/`, Google sign-in works for the allowlisted email, and the closed-loop UI loads end-to-end. Two browser-side gotchas caught and resolved during the partner sign-in (see Phase H outcomes + new caveats). Open follow-up: the Threadly storefront isn't externally exposed yet — see "Open questions". Tip is on `main` (post-Phase-H doc-and-unit-update commit).
 
-**Date paused:** 2026-04-28 (Phases F + G + curlable Phase H complete).
+**Date paused:** 2026-04-28 (Phase H complete; partner sign-in verified).
 
-**Publicly reachable.** From any browser: `GET https://demo.agenticdemo.dev/` redirects to `/oauth2/sign_in` (Google OAuth gate). From any client: `POST /webhook` with the correct `Authorization: Bearer …` returns 200 and triggers analysis; missing or wrong bearer returns 401.
+**Publicly reachable.** From any browser: `https://demo.agenticdemo.dev/` → Google sign-in (allowlisted emails only) → closed-loop UI (state=idle, version=v1.1). From any client: `POST /webhook` with the correct `Authorization: Bearer …` returns 200 and triggers analysis; missing or wrong bearer returns 401.
 
 The architectural plan lives in `orchestrator/CLOUD_DEPLOY_PLAN.md` — read that first for the WHY. This file is the operational checklist for picking up where we left off. Live cloud-deploy state (project IDs, IPs, secret paths, common ops) is in the auto-loaded memory file `cloud_deploy_resources.md` for the agentic-sre-demo project.
 
@@ -45,12 +45,13 @@ Phase B — GCP project (2026-04-27):
 Phase C — DNS + OAuth (2026-04-27):
 - Cloudflare API token at `~/.secrets/cloudflare-agenticdemo.pat` (Zone:DNS:Edit + Zone:Read on `agenticdemo.dev`, expires 2027-04-27). NOT pushed to Secret Manager — local DNS automation only.
 - A record `demo.agenticdemo.dev` → `34.136.214.114` (DNS only, not proxied). Zone ID `e790be0a65988ff895da8a6996f279c2`, record ID `3fc6d9a0798808a0a4f31f48b2d94e79`.
-- Google OAuth client `oauth2-proxy-demo-vm` created in Auth Platform → Clients. Redirect URI `https://demo.agenticdemo.dev/oauth2/callback`. Client ID at `~/.secrets/oauth2-proxy-client-id` (664), secret at `~/.secrets/oauth2-proxy-client-secret` (600). Consent screen in Testing mode — add partner emails as test users in Auth Platform → Audience.
+- Google OAuth client `oauth2-proxy-demo-vm` created in Auth Platform → Clients. Redirect URI `https://demo.agenticdemo.dev/oauth2/callback`. Client ID at `~/.secrets/oauth2-proxy-client-id` (600, restored from Console during Phase H — see caveats), client secret at `~/.secrets/oauth2-proxy-client-secret` (600). **Authoritative copy of the client ID lives in Secret Manager as `oauth2-proxy-client-id` v1** (added Phase H, Phase D list updated). Consent screen in Testing mode — add partner emails as test users in Auth Platform → Audience.
 
-Phase D — Secret Manager (2026-04-27):
-- 5 secrets pushed: `anthropic-api-key`, `webhook-bearer-token`, `oauth2-proxy-client-secret`, `oauth2-proxy-cookie-secret`, `bot-github-pat`.
+Phase D — Secret Manager (2026-04-27, expanded 2026-04-28):
+- 6 secrets pushed: `anthropic-api-key`, `webhook-bearer-token`, `oauth2-proxy-client-secret`, `oauth2-proxy-cookie-secret`, `bot-github-pat`, **`oauth2-proxy-client-id`** (added during Phase H after the local file was found to be byte-identical to `oauth2-proxy-client-secret` — see Phase C / Phase H gotcha).
 - Each granted `roles/secretmanager.secretAccessor` to the `demo-vm` SA (per-secret, not project-wide).
-- The two random tokens were generated locally with `openssl rand -base64 32` and saved to `~/.secrets/webhook-bearer-token` and `~/.secrets/oauth2-proxy-cookie-secret`.
+- The two random tokens were generated locally with `openssl rand -base64 32` and saved to `~/.secrets/webhook-bearer-token` and `~/.secrets/oauth2-proxy-cookie-secret`. **Cookie secret was later regenerated as URL-safe base64** (oauth2-proxy v7 rejects standard `+`/`/`); v3 is the live version, v1+v2 destroyed.
+- **Client IDs aren't secret in the cryptographic sense** but they are recovery-critical, so we now back them up in SM. Don't drop this convention.
 
 Phase E.1 — Static IP + DNS (2026-04-27):
 - Reserved regional address `demo-vm-ip` in us-central1 → `34.136.214.114`.
@@ -73,6 +74,9 @@ Phase E.2 — VM provisioned (2026-04-27):
 - **`gcloud secrets versions add … <<< "$val"` adds a trailing `\n`.** Bash here-strings append a newline. Use `printf '%s' "$val" | gcloud secrets versions add …` for byte-exact secret content. The cookie-secret v2 was 44 bytes (43+`\n`) before re-pushing as v3 with printf.
 - **Don't bind demo-server to `127.0.0.1`** — fluent-bit reaches it via the docker bridge gateway (`host.docker.internal:host-gateway`), not the VM's loopback. Phase G.13 made this mistake and produced `no upstream connections available to host.docker.internal:5000` until reverted in `b2a7990`. The actual external boundary for `:5000` is the GCP firewall (only 80/443 are open), so `0.0.0.0` is fine.
 - **Caddy `forward_auth` returns the upstream's status verbatim by default.** A bare `forward_auth 127.0.0.1:4180 { uri /oauth2/auth }` block sends 401 to the browser instead of redirecting to the sign-in flow. The canonical pattern is `handle_response @unauth { redir * /oauth2/sign_in?rd=… }` — the Caddyfile in `orchestrator/caddy/Caddyfile` has it.
+- **Easy to lose the OAuth client ID in Phase C.** The Google Cloud Console "OAuth client created" dialog shows Client ID and Client Secret in close proximity, both copyable, and the secret looks distinctive (`GOCSPX-…`) while the ID looks like a random string ending in `.apps.googleusercontent.com`. We accidentally saved the *secret* into both `~/.secrets/oauth2-proxy-client-id` AND `~/.secrets/oauth2-proxy-client-secret`. Phase H sign-in surfaced it as Google `error 401 invalid_client`. Mitigation: client ID is now backed up in Secret Manager as `oauth2-proxy-client-id` (it's not cryptographically secret, but losing the local file blocked sign-in). Sanity-check: `grep -E '\.apps\.googleusercontent\.com$' ~/.secrets/oauth2-proxy-client-id`.
+- **oauth2-proxy `--whitelist-domain` is required even for same-origin `rd=` redirects when behind a reverse proxy.** Without it, oauth2-proxy logs `Rejecting invalid redirect "https://demo.agenticdemo.dev/": domain / port not in whitelist` because its own `--http-address` is `127.0.0.1:4180`, so the public hostname isn't in the implicit whitelist. The unit file in the repo has `--whitelist-domain=demo.agenticdemo.dev`. If you add another hostname (e.g. a Threadly subdomain), repeat the flag.
+- **Google `error 400: redirect_uri_mismatch`** means the URI registered on the OAuth client in the Console doesn't *exactly* match what oauth2-proxy sends. We send `https://demo.agenticdemo.dev/oauth2/callback` (verbatim from `--redirect-url`). Common typos: trailing slash, `oauth/callback` vs `oauth2/callback`, `http` vs `https`. Fix is in the Console (Credentials → click client → Authorized redirect URIs), takes effect immediately on Google's side.
 
 ## Remaining work, in order
 
@@ -155,24 +159,32 @@ Outcomes (all in `b65e60f`, with G.13 reverted in `b2a7990` — see gotcha below
 - **`audit()` helper** appends one timestamped line per user action (`/simulate`, `/execute`, `/reset`, `/deploy`) to `/tmp/claude-sre.log`, including `X-Auth-Request-Email` (or `anon` if missing). The header is forwarded by Caddy via `copy_headers X-Auth-Request-Email` in the forward_auth block.
 - **fluent-bit `[OUTPUT] http`** for both `threadly_error` and `payments_error` now carries `Header Authorization Bearer ${WEBHOOK_BEARER_TOKEN}`. Env passthrough chain: `webhook.env` → systemd → `docker compose` → fluent-bit container env → conf substitution. Verified end-to-end: `/products/7` → 500 → fluent-bit → demo-server (`[WEBHOOK] Received alarm: Threadly Log Error`) → Phase 1 analysis → 3 options at ~$0.16.
 
-### Phase H — Verify ✅ curl path DONE 2026-04-28; browser path PENDING
+### Phase H — Verify ✅ DONE 2026-04-28
 
-Curl-verifiable steps complete:
+Curl path:
 - ✅ **20.** `POST /webhook` no bearer → 401; wrong bearer → 401; correct bearer → 200 + analysis fires.
 - ✅ **21.** External `curl` with bearer kicks off a real Phase 1 dispatch end-to-end.
 - ✅ **In-VM end-to-end.** `/products/7` → 500 → fluent-bit (with bearer header) → demo-server bearer check passes → runPhase1 → state=`awaiting_choice` with 3 options (rollback / fix / SNOW), confidence 95/85/40.
-- ✅ **`GET /` unauthenticated** → 302 redirect to `/oauth2/sign_in?rd=…`; `/oauth2/sign_in` itself returns 302 to Google.
+- ✅ **`GET /` unauthenticated** → 302 redirect to `/oauth2/sign_in?rd=…`.
 
-Browser-required (you, with a real Google account):
-- **18.** From your allowlisted Google account: hit `https://demo.agenticdemo.dev/` → Google login → UI loads, state=idle, version=v1.1.
-- **19.** From an unlisted Google account → 403 page from oauth2-proxy. (To test: temporarily delete your email from `/etc/oauth2-proxy/emails.txt` and reload, OR use a second Google account that isn't in the file.)
-- **22.** Click rollback remediation → confirm `deploy.sh v1.0` runs, `/products/7` returns 200. (The systemd-aware deploy.sh path was already verified during Phase E.4 issue cleanup.)
-- **23.** Click code-fix remediation → confirm a real PR appears at `https://github.com/DuaneNielsen/threadly-demo/pulls`.
-- **24.** `grep -E "AUDIT user=" /tmp/claude-sre.log` after a browser session — should show your email tied to each click.
+Browser path (verified with `duane.nielsen.rocks@gmail.com`):
+- ✅ **18.** Google sign-in → closed-loop UI loads at state=idle, version=v1.1.
+
+Surfaced and resolved during browser sign-in (these are the new caveats):
+- **`error 401 invalid_client`** on first try → root cause was the lost client_id from Phase C (saved secret into both local files). Pulled the real ID from the Console, saved as Secret Manager secret `oauth2-proxy-client-id` v1, re-materialized `/etc/oauth2-proxy/client-id.env`.
+- **`error 400 redirect_uri_mismatch`** on second try → the OAuth client's "Authorized redirect URIs" list didn't match `https://demo.agenticdemo.dev/oauth2/callback` exactly. Fixed in Google Cloud Console (no oauth2-proxy change needed).
+- **`Rejecting invalid redirect "…": domain / port not in whitelist`** in oauth2-proxy logs (latent, would have bitten the post-login redirect even with correct client_id). Added `--whitelist-domain=demo.agenticdemo.dev` to the unit ExecStart; committed.
+
+Still optional (not run yet — low priority):
+- **19.** Unlisted-account 403 test — temporarily remove your email from `/etc/oauth2-proxy/emails.txt` + reload, or sign in with a second Google account not in the file.
+- **22-23.** Click-through end-to-end of rollback / code-fix remediation — the deploy.sh path was already verified in isolation during Phase E.4 issue cleanup; the click-through just confirms it through the Phase 2 Claude dispatch.
+- **24.** `grep AUDIT /tmp/claude-sre.log` after a browser session — should show your email tied to each click. Confirmed the `audit()` helper writes the right line via curl simulation; just hasn't been tested through a real OAuth-attached browser session yet.
 
 ## Open questions to resolve at resume time
+- **Threadly storefront isn't externally exposed yet.** Currently only the closed-loop UI (`demo.agenticdemo.dev` → demo-server :5000) is reachable; the Threadly app on `:8180` is VM-internal. To let partners trigger real errors by browsing `/products/7`, set up a second hostname (proposal: `threadly.agenticdemo.dev`) — Cloudflare A record to `34.136.214.114`, new Caddy site block reverse-proxying `127.0.0.1:8180`, gated by the same oauth2-proxy. Decision deferred — at demo time the "Trigger Simulated Alarm" button on the closed-loop UI is the alternative path. If we add the subdomain, remember to also add `--whitelist-domain=threadly.agenticdemo.dev` to oauth2-proxy and add the redirect URI `https://threadly.agenticdemo.dev/oauth2/callback` on the OAuth client.
 - JAR sizes in the monorepo (~55-66MB each) — does `git clone` complete fast enough on the VM, or move to GitHub Releases? (Not yet a real problem; the VM was cloned successfully in Phase E.3.)
 - OAuth consent screen is in Testing mode — Google currently lets up to 100 test users sign in. For partner expansion past that, either move to "In Production" (requires verification for sensitive scopes — we only use email/profile so should be quick) or stay in Testing and add each partner as a test user in Auth Platform → Audience.
+- Optional ops hardening: log rotation for `/tmp/claude-sre.log` (currently grows unbounded), Anthropic spend alerting at the $25 / $40 thresholds (cap is $50/mo), automatic OAuth consent-screen verification once the partner list grows.
 
 ## Files of interest
 - `orchestrator/CLOUD_DEPLOY_PLAN.md` — architectural plan with cost table, threat model, security rationale
@@ -188,7 +200,7 @@ Browser-required (you, with a real Google account):
 
 ## Scratch space at resume
 
-Pick this up at Phase F. First verify state from your laptop:
+Phases A–H are done; the demo is live. The next session is the open question about the Threadly storefront subdomain (or just the optional Phase H steps 19, 22-24 if you want full coverage). First verify state from your laptop:
 
 ```bash
 gcloud config list                                                          # should show project=agentic-sre-demo
@@ -222,9 +234,10 @@ sudo docker ps --format 'table {{.Names}}\t{{.Status}}'
 # Phase F gates wired up?
 curl -sf http://127.0.0.1:4180/ping                                                           # oauth2-proxy
 sudo ss -tlnp | grep -E ':(80|443) '                                                          # caddy
+sudo systemctl cat oauth2-proxy | grep -E "whitelist-domain|client-id.env"                    # whitelist + client-id wired in unit
 
 # Repo at expected commit?
-git -C /opt/threadly-demo log --oneline -3                                                    # b2a7990 should be tip
+git -C /opt/threadly-demo log --oneline -3                                                    # tip should match `git log -1` on the laptop
 ```
 
 External-side checks (from your laptop):
@@ -236,4 +249,4 @@ curl -s -X POST https://demo.agenticdemo.dev/webhook -H "Authorization: Bearer $
      -H "Content-Type: application/json" -d '{"alarm_name":"resume drift","severity":"Info"}' # 200 + analysis fires (~$0.16)
 ```
 
-If any of those have drifted, see the corresponding phase outcomes for what to restore. Otherwise the next session is just (a) the browser-side Phase H steps (18, 19, 22, 23, 24) and (b) optional ops hardening — log rotation for `/tmp/claude-sre.log`, Anthropic spend alert thresholds, and an OAuth consent-screen verification path if expanding past 100 partners.
+If any of those have drifted, see the corresponding phase outcomes for what to restore. Otherwise the next session is the Threadly-subdomain decision in Open questions, plus the still-optional Phase H browser steps (19, 22-24) and any ops hardening.
